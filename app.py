@@ -48,20 +48,45 @@ with tab_mgmt:
 
     # 1. Fetch User by ID
     st.subheader("👤 User Management")
-    col_u1, col_u2 = st.columns([3, 1])
-    with col_u1:
-        u_id_search = st.text_input("Search/Add User by UUID", placeholder="8d53a79b-...")
-    with col_u2:
-        st.write("<br>", unsafe_allow_html=True)
-        if st.button("🎯 Fetch & Add", use_container_width=True):
-            if api_token and u_id_search:
-                user = fetch_user_by_id(api_token, u_id_search)
-                if user:
-                    if 'fetched_users' not in st.session_state: st.session_state['fetched_users'] = []
-                    if not any(u.get('id') == user.get('id') for u in st.session_state['fetched_users']):
-                        st.session_state['fetched_users'].append(user)
-                    st.success(f"Added: {user.get('name', 'Unknown')}")
-                else: st.error("User not found.")
+    u_id_search = st.text_input("Search User by UUID", placeholder="e.g. 8d53a79b-ae48-48db-bd28-1aa8557357a3")
+    if st.button("🔍 Fetch"):
+        if api_token and u_id_search:
+            with st.spinner("Looking up user..."):
+                user = fetch_user_by_id(api_token, u_id_search.strip())
+            if user:
+                if 'fetched_users' not in st.session_state:
+                    st.session_state['fetched_users'] = []
+                already_added = any(u.get('id') == user.get('id') for u in st.session_state['fetched_users'])
+                if not already_added:
+                    st.session_state['fetched_users'].append(user)
+                st.session_state['last_fetched_user'] = user
+            else:
+                st.session_state.pop('last_fetched_user', None)
+                st.error("❌ User not found. Check the UUID and your token.")
+        else:
+            st.warning("Enter a UUID and make sure your Bearer Token is set in the sidebar.")
+
+    # Show fetched user below search
+    if 'last_fetched_user' in st.session_state:
+        u = st.session_state['last_fetched_user']
+        uid = u.get('id', '')
+        already = any(usr.get('id') == uid for usr in st.session_state.get('fetched_users', []))
+        st.markdown(f"""
+        <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;padding:12px 16px;margin-top:6px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:28px;">👤</span>
+            <div>
+                <div style="font-weight:700;font-size:16px;color:#15803d;">{u.get('name', 'Unknown')}</div>
+                <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
+                <div style="font-size:12px;color:#16a34a;margin-top:2px;">{'✅ Added to user list' if already else ''}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Show all fetched users
+    if st.session_state.get('fetched_users'):
+        with st.expander(f"👥 Fetched Users ({len(st.session_state['fetched_users'])})"):
+            for u in st.session_state['fetched_users']:
+                st.markdown(f"• **{u.get('name', 'Unknown')}** — `{u.get('id', '')}`")
 
     # 2. Team Builder
     st.divider()
