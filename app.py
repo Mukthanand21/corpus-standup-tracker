@@ -117,42 +117,80 @@ with tab_dashboard:
             i_id = st.session_state.get('internship_cat_id', "")
             limit = st.session_state.get('fetch_limit', 500)
             
-            with st.spinner("Fetching..."):
+            with st.spinner("⏳ Fetching records (cached for 5 min)..."):
                 records = []
-                if s_id: records.extend(fetch_records(api_token, s_id, limit=limit))
-                if i_id: records.extend(fetch_records(api_token, i_id, limit=limit))
-                if not records and not (s_id or i_id): records = fetch_records(api_token, limit=limit)
+                date_str = selected_date.isoformat()
+                if s_id: records.extend(fetch_records(api_token, target_date=date_str, category_id=s_id, limit=limit))
+                if i_id: records.extend(fetch_records(api_token, target_date=date_str, category_id=i_id, limit=limit))
+                if not records and not (s_id or i_id): records = fetch_records(api_token, target_date=date_str, limit=limit)
                 
-                if not records: st.error("No records found.")
+                if not records:
+                    st.warning("⚠️ No records found. Check your token and Category IDs in the Team Management tab.")
                 else:
                     results = calculate_compliance(records, selected_date.isoformat(), all_created_teams)
-                    df = pd.DataFrame(results)
+                    df_raw = pd.DataFrame(results)
                     
-                    # Selection Filter
+                    # Selection Filter (on raw data)
                     if "All" not in filter_team:
-                        df = df[df["team_name"].isin(filter_team)]
+                        df_raw = df_raw[df_raw["team_name"].isin(filter_team)]
                     
-                    if df.empty:
-                        st.info("No matching teams.")
+                    if df_raw.empty:
+                        st.info("No matching teams found.")
                     else:
+                        session_cols = ["morning_standup", "morning_recap", "afternoon_standup", "afternoon_recap"]
+                        
+                        # Summary metrics
                         m1, m2, m3 = st.columns(3)
-                        total_sub = (df[["morning_standup", "morning_recap", "afternoon_standup", "afternoon_recap"]] == "submitted").sum().sum()
-                        m1.markdown(f'<div class="metric-card"><div class="metric-label">Teams</div><div class="metric-value">{len(df)}</div></div>', unsafe_allow_html=True)
-                        m2.markdown(f'<div class="metric-card"><div class="metric-label">Total Submissions</div><div class="metric-value">{total_sub}</div></div>', unsafe_allow_html=True)
-                        m3.markdown(f'<div class="metric-card"><div class="metric-label">Avg Completion</div><div class="metric-value">{df["completion"].mean():.1f}%</div></div>', unsafe_allow_html=True)
+                        total_sub = (df_raw[session_cols] == "submitted").sum().sum()
+                        total_late = (df_raw[session_cols] == "late").sum().sum()
+                        avg_pct = df_raw["completion"].mean()
+                        m1.markdown(f'<div class="metric-card"><div class="metric-label">Active Teams</div><div class="metric-value">{len(df_raw)}</div></div>', unsafe_allow_html=True)
+                        m2.markdown(f'<div class="metric-card"><div class="metric-label">✅ Submitted / ⚠️ Late</div><div class="metric-value">{total_sub} / {total_late}</div></div>', unsafe_allow_html=True)
+                        m3.markdown(f'<div class="metric-card"><div class="metric-label">Avg Completion</div><div class="metric-value">{avg_pct:.1f}%</div></div>', unsafe_allow_html=True)
                         
                         st.markdown("<br>", unsafe_allow_html=True)
-                        def color_status(val):
-                            if val == "submitted": return 'background-color: #d1fae5'
-                            if val == "late": return 'background-color: #fef3c7'
-                            if val == "missing": return 'background-color: #fee2e2'
-                            return ''
 
-                        st.dataframe(
-                            df.style.map(color_status, subset=["morning_standup", "morning_recap", "afternoon_standup", "afternoon_recap"]),
-                            column_config={
-                                "completion": st.column_config.ProgressColumn("Progress", format="%d%%", min_value=0, max_value=100)
-                            },
-                            use_container_width=True, hide_index=True
+                        # --- BADGE TABLE ---
+                        def badge(val: str) -> str:
+                            if val == "submitted":
+                                return '<span style="background:#d1fae5;color:#065f46;border-radius:6px;padding:3px 10px;font-weight:600;">✅ Submitted</span>'
+                            elif val == "late":
+                                return '<span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:3px 10px;font-weight:600;">⚠️ Late</span>'
+                            else:
+                                return '<span style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:3px 10px;font-weight:600;">❌ Missing</span>'
+
+                        def progress_bar(pct: float) -> str:
+                            color = "#16a34a" if pct >= 100 else "#ca8a04" if pct >= 50 else "#dc2626"
+                            return f'''<div style="background:#e5e7eb;border-radius:6px;overflow:hidden;width:100%;">
+                                <div style="width:{pct:.0f}%;background:{color};padding:4px 0;text-align:center;color:white;font-weight:bold;font-size:13px;">{pct:.0f}%</div>
+                            </div>'''
+
+                        # Build HTML table
+                        headers = ["Team Name", "Morning Standup", "Morning Recap", "Afternoon Standup", "Afternoon Recap", "Completion %"]
+                        rows_html = ""
+                        for _, row in df_raw.iterrows():
+                            rows_html += "<tr>"
+                            rows_html += f'<td style="padding:10px 14px;font-weight:600;white-space:nowrap;">{row["team_name"]}</td>'
+                            for col in session_cols:
+                                rows_html += f'<td style="padding:10px 14px;text-align:center;">{badge(row[col])}</td>'
+                            rows_html += f'<td style="padding:10px 14px;min-width:150px;">{progress_bar(row["completion"])}</td>'
+                            rows_html += "</tr>"
+
+                        header_html = "".join(
+                            f'<th style="padding:10px 14px;background:#1e3a8a;color:white;text-align:center;font-weight:600;">{h}</th>'
+                            for h in headers
                         )
-                        with st.expander("Show Details"): st.json(results)
+
+                        html_table = f"""
+                        <div style="overflow-x:auto;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.08);border:1px solid #e2e8f0;margin-top:8px;">
+                        <table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+                            <thead><tr>{header_html}</tr></thead>
+                            <tbody>
+                            {"".join(f'<tr style="background:{"#f9fafb" if i % 2 else "white"};border-bottom:1px solid #e2e8f0;">{rows_html.split("</tr>")[i].split("<tr>")[1]}</tr>' for i in range(len(df_raw)))}</tbody>
+                        </table></div>
+                        """
+                        st.markdown(html_table, unsafe_allow_html=True)
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        with st.expander("🛠️ Raw Record Data"):
+                            st.json(results)
