@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Dict, Any
-from mapping import get_team, get_all_teams
+from mapping import get_team
 
 REQUIRED_SESSIONS = [
     "morning_standup",
@@ -20,12 +20,6 @@ SESSION_WINDOWS = {
 def classify_session(timestamp_str: str) -> str:
     """
     Classifies a submission into a session or marks it as 'late' based on the timestamp.
-    
-    Args:
-        timestamp_str (str): ISO format timestamp.
-        
-    Returns:
-        str: Session name or 'late'.
     """
     try:
         dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
@@ -39,77 +33,61 @@ def classify_session(timestamp_str: str) -> str:
     except Exception:
         return "invalid"
 
-def calculate_compliance(submissions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def calculate_compliance(records: List[Dict[str, Any]], target_date: str, all_teams: List[str]) -> List[Dict[str, Any]]:
     """
-    Calculates standup compliance for each team based on submissions.
+    Calculates standup compliance for each team based on records and a target date.
     
     Args:
-        submissions (List[Dict[str, Any]]): Raw submission data from API.
+        records (List[Dict[str, Any]]): Raw record data from Swecha API.
+        target_date (str): The date to filter for (YYYY-MM-DD).
+        all_teams (List[str]): List of all team names from teams.json.
         
     Returns:
-        List[Dict[str, Any]]: Structured JSON-like output for dashboard.
+        List[Dict[str, Any]]: Structured status for each team.
     """
-    # Initialize data for all known teams
-    teams = get_all_teams()
-    team_data = {
-        team: {s: "missing" for s in REQUIRED_SESSIONS} 
-        for team in teams
-    }
+    # Initialize all created teams with "missing"
+    team_data = {team: {s: "missing" for s in REQUIRED_SESSIONS} for team in all_teams}
 
-    # Process submissions
-    for sub in submissions:
-        member_id = sub.get("member_id")
-        timestamp = sub.get("timestamp")
+    # Process records
+    for record in records:
+        # Swecha schema: user_id and created_at
+        user_id = record.get("user_id")
+        created_at = record.get("created_at")
         
-        if not member_id or not timestamp:
+        if not user_id or not created_at:
             continue
 
-        team = get_team(member_id)
+        # Filter for target date
+        if not created_at.startswith(target_date):
+            continue
+
+        team = get_team(user_id)
         
-        # If team is not in our initial map, but has submissions, we track it
+        # If team is not in created list, but has active uploads, add it to data
         if team not in team_data:
             team_data[team] = {s: "missing" for s in REQUIRED_SESSIONS}
 
-        session = classify_session(timestamp)
+        session = classify_session(created_at)
 
-        # If it matches a required session window, mark as submitted.
-        # If it was previously 'missing' and now it's 'late', we might want to prioritize 'submitted'
-        # windows if there are multiple submissions.
         if session in REQUIRED_SESSIONS:
             team_data[team][session] = "submitted"
         elif session == "late":
-            # Determine which session it was intended for (simple heuristic: closest previous session)
-            # For simplicity, we can just mark the first 'missing' session as 'late' if it's outside all windows
-            # Or as per user spec: just mark it 'late' in the output if needed.
-            # However, the user wants: "Mark session status: submitted (within), late (outside), missing (not submitted)"
-            # This implies each session should have one of these 3 statuses.
-            # To handle 'late', we need to know which session it WAS for.
-            # Let's refine: if it's late, we'll try to guess the session based on sequence or just keep a 'late' flag.
-            
-            # Logic: If timestamp is between morning_standup and morning_recap, it's a late morning_standup
-            # [9-11] Standup, [11-12] Late Standup, [12-13] Recap, etc.
-            
-            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            # Heuristic for late classification
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             hour = dt.hour
             
             late_session = None
-            if 11 <= hour < 12:
-                late_session = "morning_standup"
-            elif 13 <= hour < 14:
-                late_session = "morning_recap"
-            elif 16 <= hour < 17:
-                late_session = "afternoon_standup"
-            elif 18 <= hour <= 23:
-                late_session = "afternoon_recap"
+            if 11 <= hour < 12: late_session = "morning_standup"
+            elif 13 <= hour < 14: late_session = "morning_recap"
+            elif 16 <= hour < 17: late_session = "afternoon_standup"
+            elif 18 <= hour <= 23: late_session = "afternoon_recap"
             
             if late_session and team_data[team][late_session] == "missing":
                 team_data[team][late_session] = "late"
 
-    # Calculate completion %
+    # Format results
     results = []
     for team, sessions in team_data.items():
-        # 'submitted' counts as 1, 'late' counts as 0.5 (or according to policy, user just wants %)
-        # Usually, % is based on 'submitted'.
         completed = sum(1 for s in sessions.values() if s == "submitted")
         completion = (completed / len(REQUIRED_SESSIONS)) * 100
 
