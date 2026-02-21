@@ -1,7 +1,7 @@
 import requests
 from typing import List, Dict, Any
 
-BASE_URL = "https://corpus-backend/api/standups"
+BASE_URL = "https://corpus-backend/api/standups" # 🚨 REPLACE this with your actual Corpus API URL
 
 def fetch_standups(date_str: str) -> List[Dict[str, Any]]:
     """

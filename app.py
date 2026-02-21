@@ -17,15 +17,30 @@ Each team is expected to submit 4 sessions: **Morning Standup, Morning Recap, Af
 with st.sidebar:
     st.header("Settings")
     selected_date = st.date_input("Select Date", date.today())
+    use_demo = st.checkbox("🧪 Use Demo Data", value=True, help="Enable this to see how the dashboard works with mock data.")
     run_check = st.button("🔄 Check Compliance", use_container_width=True)
 
 if run_check:
     with st.spinner(f"Fetching data for {selected_date}..."):
-        # Fetch data
-        submissions = fetch_standups(selected_date.isoformat())
+        if use_demo:
+            # Mock data for demonstration
+            submissions = [
+                {"member_id": "u101", "name": "Alice", "timestamp": f"{selected_date}T09:30:00", "label": "stand-up"},
+                {"member_id": "u102", "name": "Bob", "timestamp": f"{selected_date}T11:15:00", "label": "stand-up"},
+                {"member_id": "u201", "name": "Charlie", "timestamp": f"{selected_date}T12:30:00", "label": "stand-up"},
+                {"member_id": "u201", "name": "Charlie", "timestamp": f"{selected_date}T14:30:00", "label": "stand-up"},
+                {"member_id": "u202", "name": "David", "timestamp": f"{selected_date}T17:15:00", "label": "stand-up"},
+            ]
+            st.info("💡 Running in Demo Mode with mock data.")
+        else:
+            # Fetch real data
+            submissions = fetch_standups(selected_date.isoformat())
         
         if not submissions:
-            st.warning(f"No submissions found for {selected_date}. This might be due to an API error or no one submitted yet.")
+            if not use_demo:
+                st.warning(f"No submissions found for {selected_date}. Please check if the BASE_URL in `fetch.py` is correct.")
+            else:
+                st.warning(f"No submissions found for {selected_date}.")
         else:
             # Process compliance
             results = calculate_compliance(submissions)
