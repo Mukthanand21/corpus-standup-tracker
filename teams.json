@@ -1,15 +1,64 @@
 {
     "teams": [
         {
-            "name": "Team 1",
+            "name": "trishul",
             "members": [
-                "0e852321-3a2c-4222-aaed-68640a8c8da2"
+                "591d3e4b-87e8-4277-a8a6-2a314c849725",
+                "8d53a79b-ae48-48db-bd28-1aa8557357a3",
+                "26df948f-f50f-4888-874b-d688e96c83b3"
             ]
         },
         {
-            "name": "Team 2",
+            "name": "sudo",
             "members": [
-                "26df948f-f50f-4888-874b-d688e96c83b3"
+                "1d271aba-c985-48bd-b9c6-8d8663f546b6",
+                "915b4d14-dca6-4c40-a59c-62226481357b",
+                "0c39e046-99af-4be0-92ba-d854076b8484"
+            ]
+        },
+        {
+            "name": "Magnum",
+            "members": [
+                "bc201fbc-9029-46d0-a57e-15ec5be453cd",
+                "b6960da6-a587-43a2-80f1-ebb7b186e247",
+                "7f694890-c3e1-4ab4-85b5-0c0fb28d91b5"
+            ]
+        },
+        {
+            "name": "Dev3",
+            "members": [
+                "87e97646-2e5a-4b2c-898d-20e03da07a48",
+                "a9a7ffa0-0fd9-448a-b785-0df74b295efe",
+                "ad3b5c3c-b28f-4694-b910-d20e30dbb08d"
+            ]
+        },
+        {
+            "name": "spk",
+            "members": [
+                "470c2961-4c7a-4201-bfc0-94352d78641e",
+                "d42609fa-8dba-4b13-8e75-dafa5641d5e3"
+            ]
+        },
+        {
+            "name": "techops",
+            "members": [
+                "00d27650-d5c0-40ee-b16e-60a0936f1c44",
+                "8982c31a-45df-4e3f-9004-b9cefbee7527"
+            ]
+        },
+        {
+            "name": "Trinity",
+            "members": [
+                "1169a208-b54b-47b9-922f-338389852eec",
+                "3c7ec645-db2a-4b02-aab6-71590007a23c",
+                "f17950a7-5aeb-4f46-8055-f8ece60c802c"
+            ]
+        },
+        {
+            "name": "Mindops",
+            "members": [
+                "702db2d3-7bee-42f8-9ede-de5b2eb43c26",
+                "ca3e5405-cb5f-4d09-af1c-d2cd9c9437d5"
             ]
         }
     ]
