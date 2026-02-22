@@ -144,22 +144,56 @@ with tab_mgmt:
     with col_t2:
         st.subheader("Existing Teams (Editable)")
         for i, team in enumerate(teams_data['teams']):
-            with st.container():
-                st.markdown(f'''<div style="border:1px solid #ddd; padding:10px; border-radius:8px; margin-bottom:5px; background:#f9f9f9">''', unsafe_allow_html=True)
-                bc1, bc2 = st.columns([4, 1])
-                bc1.write(f"**{team['name']}**")
-                if bc2.button("🗑️", key=f"del_{i}"):
-                    delete_team(team['name'])
-                    st.rerun()
-                
+            member_count = len(team.get('members', []))
+            # Build name lookup from fetched_users in session
+            fetched_map = {
+                u['id']: u.get('name', 'Unknown')
+                for u in st.session_state.get('fetched_users', [])
+            }
+
+            with st.expander(f"👥 {team['name']}  ·  {member_count} member{'s' if member_count != 1 else ''}", expanded=False):
+                # Delete button at top-right
+                del_col, _ = st.columns([1, 5])
+                with del_col:
+                    if st.button("🗑️ Delete Team", key=f"del_{i}"):
+                        delete_team(team['name'])
+                        st.rerun()
+
+                st.divider()
+
+                # Member detail cards
+                if team.get('members'):
+                    st.markdown("**Members**")
+                    for mid in team['members']:
+                        # 1st: try session cache, 2nd: call API to resolve name
+                        mname = fetched_map.get(mid)
+                        if not mname and api_token:
+                            user_data = fetch_user_by_id(api_token, mid)
+                            mname = user_data.get('name') or user_data.get('username') or user_data.get('full_name')
+                        display_name = mname if mname else f"User {mid[:8]}…"
+                        st.markdown(f"""
+<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;
+     border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;background:#f8fafc;">
+    <span style="font-size:20px;">👤</span>
+    <div>
+        <div style="font-weight:600;font-size:14px;color:#1e3a8a;">{display_name}</div>
+        <div style="font-size:11px;color:#6b7280;font-family:monospace;">{mid}</div>
+    </div>
+</div>""", unsafe_allow_html=True)
+                else:
+                    st.info("No members yet. Fetch a user above and use '➕ Add to Team'.")
+
+                st.divider()
+
+                # Edit membership (only when fetched users are available)
                 if 'fetched_users' in st.session_state:
                     user_opts = {u['id']: f"{u.get('name', 'User')} ({u['id'][:6]})" for u in st.session_state['fetched_users']}
                     cur_mem = [m for m in team['members'] if m in user_opts]
-                    sel_mem = st.multiselect("Members", options=list(user_opts.keys()), default=cur_mem, format_func=lambda x: user_opts[x], key=f"ms_{i}")
-                    if st.button("💾 Save", key=f"save_{i}"):
+                    sel_mem = st.multiselect("Edit members", options=list(user_opts.keys()), default=cur_mem, format_func=lambda x: user_opts[x], key=f"ms_{i}")
+                    if st.button("💾 Save Changes", key=f"save_{i}"):
                         update_team_membership(team['name'], sel_mem)
-                        st.success("Saved.")
-                st.markdown("</div>", unsafe_allow_html=True)
+                        st.success("✅ Saved.")
+
 
 # --- DASHBOARD ---
 with tab_dashboard:
