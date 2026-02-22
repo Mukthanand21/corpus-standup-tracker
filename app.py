@@ -1,408 +1,942 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+import plotly.graph_objects as go
+from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fetch import fetch_user_by_id, fetch_user_audio_contributions, search_users
 from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
-from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
-from auth import get_token
+from mapping import load_teams, save_teams, delete_team, get_all_teams
 
 load_dotenv()
 
-st.set_page_config(page_title="Standup Tracker | Viswam.Ai", page_icon="🚀", layout="wide")
+try:
+    from auth import get_token
+    if "api_token" not in st.session_state:
+        try:
+            st.session_state["api_token"] = get_token()
+        except RuntimeError as e:
+            st.error(f"🔐 Auto-login failed: {e}")
+            st.stop()
+except ImportError:
+    if "api_token" not in st.session_state:
+        st.session_state["api_token"] = ""
 
+api_token: str = st.session_state.get("api_token", "")
+
+st.set_page_config(
+    page_title="Standup Tracker · Viswam.Ai",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MASTER STYLESHEET
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .metric-card {
-        background: white; padding: 20px; border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #eee; text-align: center;
-    }
-    .metric-value { font-size: 24px; font-weight: bold; color: #1e3a8a; }
-    .metric-label { font-size: 14px; color: #666; }
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&family=Nunito:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg:        #070d1a;
+  --surface:   #0d1629;
+  --surface2:  #111d35;
+  --surface3:  #162440;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+  --text:      #e8edf8;
+  --text2:     #8899bb;
+  --text3:     #556080;
+  --amber:     #f59e0b;
+  --amber2:    #fbbf24;
+  --green:     #10b981;
+  --green2:    #34d399;
+  --red:       #ef4444;
+  --red2:      #f87171;
+  --blue:      #3b82f6;
+  --blue2:     #60a5fa;
+  --violet:    #8b5cf6;
+}
+
+html, body, [class*="css"] {
+  font-family: 'Nunito', sans-serif;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+.stApp {
+  background: var(--bg) !important;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+  background: var(--surface) !important;
+  border-right: 1px solid var(--border2) !important;
+}
+[data-testid="stSidebar"] > div { padding-top: 24px; }
+[data-testid="stSidebar"] * { color: var(--text2) !important; }
+[data-testid="stSidebar"] strong, [data-testid="stSidebar"] h3 { color: var(--text) !important; }
+[data-testid="stSidebar"] hr { border-color: var(--border2) !important; margin: 16px 0; }
+[data-testid="stSidebar"] table { width: 100%; border-collapse: collapse; }
+[data-testid="stSidebar"] th { color: var(--text3) !important; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 6px 8px; border-bottom: 1px solid var(--border) !important; }
+[data-testid="stSidebar"] td { padding: 8px; font-size: 12px; border-bottom: 1px solid var(--border) !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+  background: var(--surface2) !important;
+  border-radius: 14px !important;
+  padding: 6px !important;
+  gap: 4px !important;
+  border: 1px solid var(--border2) !important;
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: 10px !important;
+  font-family: 'Syne', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  color: var(--text3) !important;
+  padding: 8px 20px !important;
+  transition: all 0.2s !important;
+}
+.stTabs [aria-selected="true"] {
+  background: linear-gradient(135deg, #1a2d5a, #1e3a8a) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px rgba(59,130,246,0.3) !important;
+}
+
+/* ── Buttons ── */
+.stButton > button {
+  font-family: 'Syne', sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  border-radius: 10px !important;
+  border: 1px solid var(--border2) !important;
+  background: var(--surface3) !important;
+  color: var(--text) !important;
+  transition: all 0.2s !important;
+  letter-spacing: 0.3px;
+}
+.stButton > button:hover {
+  background: var(--surface2) !important;
+  border-color: var(--blue) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 20px rgba(59,130,246,0.2) !important;
+}
+.stButton > button[kind="primary"] {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+  border: none !important;
+  color: white !important;
+  box-shadow: 0 4px 20px rgba(37,99,235,0.4) !important;
+}
+.stButton > button[kind="primary"]:hover {
+  background: linear-gradient(135deg, #1e40af, #1d4ed8) !important;
+  box-shadow: 0 6px 28px rgba(37,99,235,0.55) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* ── Inputs ── */
+.stTextInput input, .stSelectbox > div > div, .stDateInput input,
+.stNumberInput input, .stMultiSelect > div > div {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 10px !important;
+  color: var(--text) !important;
+  font-family: 'Nunito', sans-serif !important;
+  font-size: 14px !important;
+}
+.stTextInput input:focus { border-color: var(--blue) !important; box-shadow: 0 0 0 3px rgba(59,130,246,0.15) !important; }
+.stSelectbox > div > div { padding: 2px 10px !important; }
+div[data-baseweb="select"] > div { background: var(--surface2) !important; border-color: var(--border2) !important; }
+div[data-baseweb="popover"] { background: var(--surface2) !important; border: 1px solid var(--border2) !important; }
+li[role="option"] { color: var(--text) !important; background: var(--surface2) !important; }
+li[role="option"]:hover { background: var(--surface3) !important; }
+
+/* ── Labels / text ── */
+label, .stTextInput label, .stSelectbox label, .stDateInput label,
+.stMultiSelect label, .stNumberInput label {
+  color: var(--text2) !important;
+  font-family: 'Syne', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.8px !important;
+}
+p, li, .stMarkdown p { color: var(--text2) !important; font-size: 14px; }
+h1,h2,h3 { font-family: 'Syne', sans-serif !important; color: var(--text) !important; }
+
+/* ── Expander ── */
+.streamlit-expanderHeader {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 12px !important;
+  color: var(--text) !important;
+  font-family: 'Syne', sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+  transition: all 0.2s !important;
+}
+.streamlit-expanderHeader:hover {
+  border-color: var(--blue) !important;
+  background: var(--surface3) !important;
+}
+.streamlit-expanderContent {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-top: none !important;
+  border-radius: 0 0 12px 12px !important;
+  padding: 16px !important;
+}
+
+/* ── Spinner / misc ── */
+.stSpinner > div { border-top-color: var(--blue) !important; }
+.stSuccess { background: rgba(16,185,129,0.12) !important; border-color: var(--green) !important; color: var(--green2) !important; }
+.stWarning { background: rgba(245,158,11,0.12) !important; border-color: var(--amber) !important; color: var(--amber2) !important; }
+.stInfo { background: rgba(59,130,246,0.1) !important; border-color: var(--blue) !important; color: var(--blue2) !important; }
+.stError { background: rgba(239,68,68,0.12) !important; border-color: var(--red) !important; color: var(--red2) !important; }
+hr { border-color: var(--border2) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Auto-login ────────────────────────────────────────────────────────────────
-if "api_token" not in st.session_state:
-    try:
-        st.session_state["api_token"] = get_token()
-    except RuntimeError as e:
-        st.error(f"🔐 Auto-login failed: {e}")
-        st.info("Set CORPUS_PHONE and CORPUS_PASSWORD in your .env file.")
-        st.stop()
+# ─────────────────────────────────────────────────────────────────────────────
+# HERO HEADER
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style="
+  background: linear-gradient(135deg, #0a1628 0%, #0f2044 40%, #0d1a38 100%);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 20px;
+  padding: 32px 40px;
+  margin-bottom: 28px;
+  position: relative;
+  overflow: hidden;
+">
+  <!-- decorative circles -->
+  <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;
+    background:radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);border-radius:50%;"></div>
+  <div style="position:absolute;bottom:-60px;left:20%;width:300px;height:300px;
+    background:radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%);border-radius:50%;"></div>
 
-api_token: str = st.session_state["api_token"]
+  <div style="display:flex;align-items:center;gap:20px;position:relative;z-index:1;">
+    <div style="
+      width:60px;height:60px;
+      background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+      border-radius:16px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:28px;
+      box-shadow:0 8px 24px rgba(59,130,246,0.4);
+    ">⚡</div>
+    <div>
+      <div style="
+        font-family:'Syne',sans-serif;
+        font-size:28px;
+        font-weight:800;
+        color:#f1f5f9;
+        letter-spacing:-0.5px;
+        line-height:1;
+      ">Standup Compliance Tracker</div>
+      <div style="font-size:13px;color:#4d6fa0;margin-top:6px;font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;">
+        ◈ VISWAM.AI &nbsp;·&nbsp; SWECHA CORPUS BACKEND &nbsp;·&nbsp; IST TIMEZONE
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:12px;">
+      <div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:6px 14px;font-size:12px;color:#34d399;font-family:'JetBrains Mono',monospace;">● LIVE</div>
+      <div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);border-radius:8px;padding:6px 14px;font-size:12px;color:#60a5fa;font-family:'JetBrains Mono',monospace;">IST UTC+5:30</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.title("🚀 Team Standup Compliance Tracker")
-st.caption("Viswam.Ai - Swecha Corpus Backend Powered")
-
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🕐 Standup Time Slots")
     st.markdown("""
-| Session | On-Time | Late |
-|:--------|:--------|:-----|
-| 🌅 Morning Standup | 09:00 – 10:59 | 11:00 – 11:59 |
-| 🔄 Morning Recap | 12:00 – 12:59 | 13:00 – 13:59 |
-| ☀️ Afternoon Standup | 14:00 – 15:59 | 16:00 – 16:59 |
-| 🔄 Afternoon Recap | 17:00 – 17:59 | 18:00 – 23:59 |
-""")
-    st.markdown("---")
-    st.markdown("""
-**Status Legend**
-- ✅ **Submitted** — On time
-- ⚠️ **Late** — Within late window
-- ❌ **Missing** — No submission
-""")
-    st.markdown("---")
-    st.caption("All times are in IST (UTC+5:30)")
+    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+      color:#e8edf8;margin-bottom:4px;letter-spacing:-0.3px;">Session Windows</div>
+    <div style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;
+      letter-spacing:0.5px;margin-bottom:16px;">ALL TIMES IN IST</div>
+    """, unsafe_allow_html=True)
 
-tab_dashboard, tab_mgmt = st.tabs(["📊 Compliance Dashboard", "👥 Team Management"])
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TEAM MANAGEMENT
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_mgmt:
-    st.header("Team & Member Setup")
-    st.subheader("👤 Add Member")
-
-    # ── Single combined search + autocomplete bar ─────────────────────────────
-    try:
-        from streamlit_searchbox import st_searchbox
-
-        def _search_fn(query: str):
-            """Auto-called as user types. Returns display labels for dropdown."""
-            if not query or len(query.strip()) < 1 or not api_token:
-                return []
-            raw = search_users(api_token, query.strip())
-            labels = []
-            raw_map = {}
-            for u in raw:
-                uname = u.get("username") or u.get("id") or ""
-                display = u.get("name") or u.get("full_name") or uname
-                label = f"{display} (@{uname})" if display and display != uname else uname
-                if label and label not in raw_map:
-                    labels.append(label)
-                    raw_map[label] = u
-            st.session_state["_raw_search_map"] = raw_map
-            return labels
-
-        selected_label = st_searchbox(
-            _search_fn,
-            key="user_searchbox",
-            placeholder="🔍 Type name or username — results appear automatically…",
-            label="Search & Select User",
-            clear_on_submit=False,
-            debounce=350,
-        )
-
-        if selected_label:
-            import re
-            raw_map = st.session_state.get("_raw_search_map", {})
-            matched = raw_map.get(selected_label, {})
-            m = re.search(r"@(\w+)", selected_label)
-            username_guess = matched.get("username") or (m.group(1) if m else selected_label.strip())
-            user_id_guess  = matched.get("id") or username_guess
-
-            prev_sel = st.session_state.get("_last_selected_sb", "")
-            if user_id_guess != prev_sel:
-                st.session_state["_last_selected_sb"] = user_id_guess
-                with st.spinner(f"Fetching profile for @{username_guess}…"):
-                    fetched = fetch_user_by_id(api_token, user_id_guess)
-                if fetched:
-                    if not fetched.get("id"):
-                        fetched["id"] = user_id_guess
-                    st.session_state["selected_user"] = fetched
-                else:
-                    st.error("❌ Could not fetch user profile.")
-
-    except ImportError:
-        # ── Fallback: single text input, auto-searches on change ─────────────
-        st.caption("💡 Install `streamlit-searchbox` for true typeahead: `pip install streamlit-searchbox`")
-
-        user_query = st.text_input(
-            "🔍 Search user",
-            placeholder="Type name or username — results appear below automatically…",
-            key="user_search_input",
-        )
-
-        if user_query and user_query.strip():
-            prev_query = st.session_state.get("_last_query", "")
-            if user_query.strip() != prev_query:
-                st.session_state["_last_query"] = user_query.strip()
-                st.session_state.pop("_last_selected", None)
-                if api_token:
-                    with st.spinner("Searching…"):
-                        raw_results = search_users(api_token, user_query.strip())
-                    st.session_state["search_results"] = raw_results or []
-
-        results = st.session_state.get("search_results", [])
-        if results and user_query and user_query.strip():
-            user_options = {}
-            for u in results:
-                uname = u.get("username") or u.get("id") or ""
-                display = u.get("name") or u.get("full_name") or uname
-                label = f"{display} (@{uname})" if display and display != uname else uname
-                if uname and label not in user_options:
-                    user_options[label] = u.get("id") or uname
-
-            if user_options:
-                selected_label = st.radio(
-                    "Select:",
-                    options=list(user_options.keys()),
-                    key="user_radio",
-                    horizontal=True,
-                    label_visibility="collapsed",
-                )
-                selected_id = user_options.get(selected_label, "")
-                prev_sel = st.session_state.get("_last_selected", "")
-                if selected_id and selected_id != prev_sel:
-                    st.session_state["_last_selected"] = selected_id
-                    with st.spinner("Fetching profile…"):
-                        fetched = fetch_user_by_id(api_token, selected_id)
-                    if fetched:
-                        if not fetched.get("id"):
-                            fetched["id"] = selected_id
-                        st.session_state["selected_user"] = fetched
-                    else:
-                        st.error("❌ Could not fetch user profile.")
-
-    # ── Selected user card + team assignment ──────────────────────────────────
-    if st.session_state.get("selected_user"):
-        user  = st.session_state["selected_user"]
-        uid   = user.get("id", "")
-        uname = user.get("name") or user.get("full_name") or user.get("username") or uid
-
+    sessions = [
+        ("🌅", "Morning Standup",   "09:00–09:30", "09:30–10:30"),
+        ("🔄", "Morning Recap",     "12:00–12:30", "12:30–13:30"),
+        ("☀️", "Afternoon Standup", "13:30–14:00", "14:00–15:00"),
+        ("🌆", "Afternoon Recap",   "16:30–17:00", "17:00–00:00"),
+    ]
+    for icon, name, on_time, late in sessions:
         st.markdown(f"""
-        <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;
-                    padding:12px 16px;margin-top:8px;">
-            <div style="display:flex;align-items:center;gap:12px;">
-                <span style="font-size:28px;">👤</span>
-                <div>
-                    <div style="font-weight:700;font-size:16px;color:#15803d;">{uname}</div>
-                    <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
-                </div>
-            </div>
+        <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+          border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:#8899bb;
+            margin-bottom:6px;">{icon} {name}</div>
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);
+              border-radius:6px;padding:3px 8px;font-family:'JetBrains Mono',monospace;
+              font-size:10px;color:#34d399;">✓ {on_time}</div>
+            <div style="flex:1;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);
+              border-radius:6px;padding:3px 8px;font-family:'JetBrains Mono',monospace;
+              font-size:10px;color:#fbbf24;">⚡ {late}</div>
+          </div>
         </div>
         """, unsafe_allow_html=True)
 
-        _existing_teams = [t["name"] for t in load_teams().get("teams", [])]
-        if _existing_teams:
-            _ac1, _ac2 = st.columns([3, 1])
-            with _ac1:
-                _selected_team = st.selectbox(
-                    "Assign to team",
-                    options=_existing_teams,
-                    key=f"assign_team_{uid}",
-                )
-            with _ac2:
-                st.write("")
-                if st.button("➕ Add to Team", key=f"btn_assign_{uid}", use_container_width=True):
-                    _td = load_teams()
-                    for _t in _td["teams"]:
-                        if _t["name"] == _selected_team:
-                            if uid not in _t["members"]:
-                                _t["members"].append(uid)
-                                save_teams(_td)
-                                st.success(f"✅ **{uname}** added to **{_selected_team}**!")
-                            else:
-                                st.info(f"ℹ️ **{uname}** is already in **{_selected_team}**.")
-                            break
-        else:
-            st.info("ℹ️ No teams yet — create one below to assign this user.")
-
-    # ── Team Builder ──────────────────────────────────────────────────────────
-    st.divider()
-    teams_data = load_teams()
-
-    col_t1, col_t2 = st.columns([1, 2])
-    with col_t1:
-        st.subheader("Create Team")
-        nt_name = st.text_input("Team Name", key="new_team_name")
-        if st.button("➕ Create"):
-            if nt_name.strip() and nt_name.strip() not in [t["name"] for t in teams_data["teams"]]:
-                teams_data["teams"].append({"name": nt_name.strip(), "members": []})
-                save_teams(teams_data)
-                st.rerun()
-            elif not nt_name.strip():
-                st.warning("Enter a team name.")
-            else:
-                st.warning("Team already exists.")
-
-    with col_t2:
-        st.subheader("Existing Teams")
-        for i, team in enumerate(teams_data["teams"]):
-            member_count = len(team.get("members", []))
-            with st.expander(
-                f"👥 {team['name']}  ·  {member_count} member{'s' if member_count != 1 else ''}",
-                expanded=False,
-            ):
-                # Delete entire team
-                del_col, _ = st.columns([1, 5])
-                with del_col:
-                    if st.button("🗑️ Delete Team", key=f"del_{i}"):
-                        delete_team(team["name"])
-                        st.rerun()
-
-                st.divider()
-
-                # Members with individual remove buttons
-                if team.get("members"):
-                    st.markdown("**Members**")
-                    members_to_remove = []
-                    for mid in team["members"]:
-                        user_data = fetch_user_by_id(api_token, mid) if api_token else {}
-                        mname = (
-                            user_data.get("name")
-                            or user_data.get("full_name")
-                            or user_data.get("username")
-                            or f"@{mid}"
-                        )
-                        card_col, btn_col = st.columns([5, 1])
-                        with card_col:
-                            st.markdown(f"""
-<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;
-     border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;background:#f8fafc;">
-    <span style="font-size:20px;">👤</span>
-    <div>
-        <div style="font-weight:600;font-size:14px;color:#1e3a8a;">{mname}</div>
-        <div style="font-size:11px;color:#6b7280;font-family:monospace;">{mid}</div>
-    </div>
-</div>""", unsafe_allow_html=True)
-                        with btn_col:
-                            st.write("")
-                            if st.button("❌", key=f"rm_{i}_{mid}", help=f"Remove {mname}"):
-                                members_to_remove.append(mid)
-
-                    # Apply removals after rendering all cards
-                    if members_to_remove:
-                        _td = load_teams()
-                        for _t in _td["teams"]:
-                            if _t["name"] == team["name"]:
-                                _t["members"] = [m for m in _t["members"] if m not in members_to_remove]
-                                break
-                        save_teams(_td)
-                        st.rerun()
-                else:
-                    st.info("No members yet. Search above and use '➕ Add to Team'.")
-
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+      color:#556080;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">Legend</div>
+    """, unsafe_allow_html=True)
+    for icon, label, color in [("✅","Submitted — On time","#10b981"), ("⚠️","Late — Grace window","#f59e0b"), ("❌","Missing — No submission","#ef4444")]:
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span>{icon}</span>
+          <span style="font-size:12px;color:{color};">{label}</span>
+        </div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DASHBOARD
+# TABS
 # ─────────────────────────────────────────────────────────────────────────────
-with tab_dashboard:
-    st.header("Team Compliance Report")
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        selected_date = st.date_input("Date", date.today())
-    with c2:
-        all_created_teams = get_all_teams()
-        filter_team = st.multiselect(
-            "Filter Teams", options=["All"] + all_created_teams, default=["All"]
-        )
-    with c3:
-        st.write("<br>", unsafe_allow_html=True)
-        run = st.button("🚀 Check Compliance", use_container_width=True, type="primary")
+tab_dash, tab_analytics, tab_teams = st.tabs([
+    "⚡  Compliance",
+    "📊  Analytics",
+    "👥  Team Management",
+])
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COMPLIANCE DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_dash:
+    # Filter bar
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0d1629,#111d35);
+      border:1px solid rgba(255,255,255,0.08);border-radius:16px;
+      padding:20px 24px;margin-bottom:24px;">
+      <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+        color:#4d6fa0;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
+        Filter Controls
+      </div>
+    """, unsafe_allow_html=True)
+
+    fc1, fc2, fc3 = st.columns([1, 1.5, 1])
+    with fc1:
+        selected_date = st.date_input("Select Date", date.today(), key="dash_date")
+    with fc2:
+        all_teams_list = get_all_teams()
+        filter_team = st.multiselect("Filter Teams", ["All"] + all_teams_list, default=["All"], key="dash_teams")
+    with fc3:
+        st.write("")
+        run = st.button("⚡  Run Compliance Check", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
-        teams_data = load_teams()
-        all_usernames = list({
-            username
-            for team in teams_data.get("teams", [])
-            for username in team.get("members", [])
-        })
+        teams_data   = load_teams()
+        all_usernames = list({u for t in teams_data.get("teams",[]) for u in t.get("members",[])})
 
         if not all_usernames:
-            st.warning("⚠️ No team members found. Add members in the 'Team Management' tab first.")
+            st.warning("No members found. Add members in Team Management first.")
         else:
-            with st.spinner(f"🎙️ Fetching audio contributions for {len(all_usernames)} member(s)..."):
-                records_by_user = {
-                    uname: fetch_user_audio_contributions(api_token, uname)
-                    for uname in all_usernames
-                }
+            with st.spinner("Fetching contributions…"):
+                records_by_user = {u: fetch_user_audio_contributions(api_token, u) for u in all_usernames}
 
             results = []
             for team in teams_data.get("teams", []):
-                slots = get_team_slot_compliance(
-                    team.get("members", []), records_by_user, selected_date
-                )
-                completed = sum(1 for v in slots.values() if v == "submitted")
+                slots     = get_team_slot_compliance(team.get("members",[]), records_by_user, selected_date)
+                submitted = sum(1 for v in slots.values() if v == "submitted")
+                late      = sum(1 for v in slots.values() if v == "late")
+                missing   = len(REQUIRED_SESSIONS) - submitted - late
                 results.append({
-                    "team_name": team["name"],
-                    **slots,
-                    "completion": (completed / len(REQUIRED_SESSIONS)) * 100,
+                    "team_name": team["name"], **slots,
+                    "submitted": submitted, "late": late, "missing": missing,
+                    "completion": (submitted / len(REQUIRED_SESSIONS)) * 100,
                 })
 
-            if not results:
-                st.warning("⚠️ No teams configured.")
+            df = pd.DataFrame(results)
+            if "All" not in filter_team:
+                df = df[df["team_name"].isin(filter_team)]
+
+            if df.empty:
+                st.info("No matching teams.")
             else:
-                df_raw = pd.DataFrame(results)
-                if "All" not in filter_team:
-                    df_raw = df_raw[df_raw["team_name"].isin(filter_team)]
+                session_cols = ["morning_standup","morning_recap","afternoon_standup","afternoon_recap"]
+                tot_sub   = int((df[session_cols]=="submitted").sum().sum())
+                tot_late  = int((df[session_cols]=="late").sum().sum())
+                tot_miss  = int((df[session_cols]=="missing").sum().sum())
+                avg_pct   = df["completion"].mean()
+                n_perfect = int((df["completion"]==100).sum())
 
-                if df_raw.empty:
-                    st.info("No matching teams found.")
-                else:
-                    session_cols = [
-                        "morning_standup", "morning_recap",
-                        "afternoon_standup", "afternoon_recap",
-                    ]
-                    m1, m2, m3 = st.columns(3)
-                    total_sub  = (df_raw[session_cols] == "submitted").sum().sum()
-                    total_late = (df_raw[session_cols] == "late").sum().sum()
-                    avg_pct    = df_raw["completion"].mean()
-                    m1.markdown(f'<div class="metric-card"><div class="metric-label">Active Teams</div><div class="metric-value">{len(df_raw)}</div></div>', unsafe_allow_html=True)
-                    m2.markdown(f'<div class="metric-card"><div class="metric-label">✅ Submitted / ⚠️ Late</div><div class="metric-value">{total_sub} / {total_late}</div></div>', unsafe_allow_html=True)
-                    m3.markdown(f'<div class="metric-card"><div class="metric-label">Avg Completion</div><div class="metric-value">{avg_pct:.1f}%</div></div>', unsafe_allow_html=True)
+                # ── KPI Strip ──
+                kpis = [
+                    ("⚡","Teams",        str(len(df)),     "#3b82f6","rgba(59,130,246,0.12)","rgba(59,130,246,0.25)"),
+                    ("✅","Submitted",    str(tot_sub),     "#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
+                    ("⚠️","Late",         str(tot_late),    "#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
+                    ("❌","Missing",      str(tot_miss),    "#ef4444","rgba(239,68,68,0.12)", "rgba(239,68,68,0.25)"),
+                    ("🏆","Perfect Teams",str(n_perfect),   "#8b5cf6","rgba(139,92,246,0.12)","rgba(139,92,246,0.25)"),
+                    ("📊","Avg Complete", f"{avg_pct:.0f}%","#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
+                ]
+                cols = st.columns(6)
+                for col, (icon, label, val, clr, bg, brd) in zip(cols, kpis):
+                    col.markdown(f"""
+                    <div style="background:{bg};border:1px solid {brd};border-radius:14px;
+                      padding:18px 16px;text-align:center;transition:all 0.2s;">
+                      <div style="font-size:22px;margin-bottom:6px;">{icon}</div>
+                      <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;
+                        color:{clr};line-height:1;">{val}</div>
+                      <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:6px;
+                        text-transform:uppercase;letter-spacing:1px;font-weight:700;">{label}</div>
+                    </div>""", unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
 
-                    def badge(val: str) -> str:
-                        if val == "submitted":
-                            return '<span style="background:#d1fae5;color:#065f46;border-radius:6px;padding:3px 10px;font-weight:600;">✅ Submitted</span>'
-                        elif val == "late":
-                            return '<span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:3px 10px;font-weight:600;">⚠️ Late</span>'
-                        else:
-                            return '<span style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:3px 10px;font-weight:600;">❌ Missing</span>'
+                # ── Compliance Table ──
+                st.markdown("""
+                <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                  color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
+                  ◈ Team Compliance Matrix
+                </div>""", unsafe_allow_html=True)
 
-                    def progress_bar(pct: float) -> str:
-                        color = "#16a34a" if pct >= 100 else "#ca8a04" if pct >= 50 else "#dc2626"
-                        return (
-                            f'<div style="background:#e5e7eb;border-radius:6px;overflow:hidden;width:100%;">'
-                            f'<div style="width:{pct:.0f}%;background:{color};padding:4px 0;'
-                            f'text-align:center;color:white;font-weight:bold;font-size:13px;">'
-                            f'{pct:.0f}%</div></div>'
-                        )
+                def badge(val):
+                    if val == "submitted":
+                        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">✓ ON TIME</span>'
+                    elif val == "late":
+                        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">⚡ LATE</span>'
+                    return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">✕ MISSING</span>'
 
-                    headers = [
-                        "Team Name", "Morning Standup", "Morning Recap",
-                        "Afternoon Standup", "Afternoon Recap", "Completion %",
-                    ]
-                    header_html = "".join(
-                        f'<th style="padding:10px 14px;background:#1e3a8a;color:white;'
-                        f'text-align:center;font-weight:600;">{h}</th>'
-                        for h in headers
+                def pbar(pct):
+                    if pct >= 100: fill = "linear-gradient(90deg,#059669,#10b981)"
+                    elif pct >= 50: fill = "linear-gradient(90deg,#b45309,#f59e0b)"
+                    else: fill = "linear-gradient(90deg,#b91c1c,#ef4444)"
+                    return f'''<div style="background:rgba(255,255,255,0.06);border-radius:100px;height:28px;overflow:hidden;min-width:130px;position:relative;">
+                      <div style="width:{pct:.0f}%;height:100%;background:{fill};border-radius:100px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;">
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:white;">{pct:.0f}%</span>
+                      </div>
+                    </div>'''
+
+                session_labels = ["Morning Standup", "Morning Recap", "Afternoon Standup", "Afternoon Recap"]
+                th_style = "padding:12px 16px;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#4d6fa0;text-align:center;border-bottom:1px solid rgba(255,255,255,0.06);"
+                th_first = th_style.replace("text-align:center","text-align:left")
+
+                thead = f'<tr><th style="{th_first}">Team</th>'
+                for lbl in session_labels:
+                    thead += f'<th style="{th_style}">{lbl}</th>'
+                thead += f'<th style="{th_style}">Completion</th></tr>'
+
+                tbody = ""
+                for idx, (_, row) in enumerate(df.iterrows()):
+                    bg = "rgba(255,255,255,0.015)" if idx % 2 else "transparent"
+                    pct = row["completion"]
+                    td_base = "padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:center;vertical-align:middle;"
+                    tbody += f'<tr style="background:{bg};transition:background 0.15s;" onmouseover="this.style.background=\'rgba(59,130,246,0.05)\'" onmouseout="this.style.background=\'{bg}\'">'
+                    tbody += f'<td style="{td_base}text-align:left;"><div style="font-family:\'Syne\',sans-serif;font-weight:800;font-size:14px;color:#e8edf8;">{row["team_name"]}</div></td>'
+                    for col in session_cols:
+                        tbody += f'<td style="{td_base}">{badge(row[col])}</td>'
+                    tbody += f'<td style="{td_base}">{pbar(pct)}</td>'
+                    tbody += "</tr>"
+
+                st.markdown(f"""
+                <div style="overflow-x:auto;background:linear-gradient(135deg,#0d1629,#111d35);
+                  border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden;">
+                  <table style="width:100%;border-collapse:collapse;font-family:'Nunito',sans-serif;">
+                    <thead style="background:rgba(255,255,255,0.03);">{thead}</thead>
+                    <tbody>{tbody}</tbody>
+                  </table>
+                </div>""", unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── Bar Chart ──
+                st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                  color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
+                  ◈ Session Status Overview</div>""", unsafe_allow_html=True)
+
+                fig = go.Figure()
+                names = df["team_name"].tolist()
+                fig.add_trace(go.Bar(name="✅ On Time", x=names, y=df["submitted"].tolist(),
+                    marker=dict(color="#10b981", line=dict(width=0)),
+                    marker_cornerradius=6))
+                fig.add_trace(go.Bar(name="⚡ Late", x=names, y=df["late"].tolist(),
+                    marker=dict(color="#f59e0b", line=dict(width=0)),
+                    marker_cornerradius=6))
+                fig.add_trace(go.Bar(name="✕ Missing", x=names, y=df["missing"].tolist(),
+                    marker=dict(color="#ef4444", line=dict(width=0)),
+                    marker_cornerradius=6))
+                fig.update_layout(
+                    barmode="group", height=320,
+                    plot_bgcolor="rgba(13,22,41,0.8)",
+                    paper_bgcolor="rgba(13,22,41,0.0)",
+                    font=dict(family="JetBrains Mono", size=11, color="#8899bb"),
+                    legend=dict(orientation="h", y=1.15, x=0, font=dict(size=11, color="#8899bb"),
+                                bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=0, r=0, t=40, b=0),
+                    xaxis=dict(showgrid=False, tickfont=dict(size=12, color="#8899bb"),
+                               linecolor="rgba(255,255,255,0.06)"),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)",
+                               tickfont=dict(size=11, color="#556080"),
+                               zeroline=False, title="Sessions"),
+                )
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ANALYTICS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_analytics:
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0d1629,#111d35);
+      border:1px solid rgba(255,255,255,0.08);border-radius:16px;
+      padding:20px 24px;margin-bottom:24px;">
+      <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+        color:#4d6fa0;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
+        Analytics Filters
+      </div>
+    """, unsafe_allow_html=True)
+
+    ac1, ac2, ac3 = st.columns([1, 1.5, 1])
+    with ac1:
+        period = st.selectbox("Time Period", ["Last 7 days","Last 30 days","Last 3 months","Last 6 months"], index=1)
+    with ac2:
+        all_teams_list2 = get_all_teams()
+        analytics_teams = st.multiselect("Teams", ["All"] + all_teams_list2, default=["All"], key="an_teams")
+    with ac3:
+        st.write("")
+        run_an = st.button("📊  Load Analytics", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if run_an:
+        days_map = {"Last 7 days":7,"Last 30 days":30,"Last 3 months":90,"Last 6 months":180}
+        days     = days_map[period]
+        today    = date.today()
+        start_dt = today - timedelta(days=days)
+        IST      = timezone(timedelta(hours=5, minutes=30))
+
+        teams_data = load_teams()
+        teams_to_show = teams_data.get("teams", [])
+        if "All" not in analytics_teams:
+            teams_to_show = [t for t in teams_to_show if t["name"] in analytics_teams]
+
+        all_members = list({u for t in teams_to_show for u in t.get("members", [])})
+        member_to_team = {u: t["name"] for t in teams_to_show for u in t.get("members", [])}
+
+        if not all_members:
+            st.warning("No members found.")
+        else:
+            with st.spinner("Loading analytics data…"):
+                records_by_user = {u: fetch_user_audio_contributions(api_token, u) for u in all_members}
+
+            # Flatten + classify
+            rows = []
+            submitted_w = [(9.0,9.5),(12.0,12.5),(13.5,14.0),(16.5,17.0)]
+            late_w      = [(9.5,10.5),(12.5,13.5),(14.0,15.0),(17.0,24.0)]
+            def classify_h(h):
+                for s,e in submitted_w:
+                    if s<=h<e: return "submitted"
+                for s,e in late_w:
+                    if s<=h<e: return "late"
+                return "other"
+
+            for uid, records in records_by_user.items():
+                for r in records:
+                    ts = r.get("timestamp")
+                    if isinstance(ts, datetime):
+                        if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+                        ts_ist = ts.astimezone(IST)
+                        rec_date = ts_ist.date()
+                        if start_dt <= rec_date <= today:
+                            h = ts_ist.hour + ts_ist.minute/60
+                            rows.append({
+                                "user": uid,
+                                "team": member_to_team.get(uid,"Unassigned"),
+                                "date": rec_date,
+                                "hour": h,
+                                "hour_int": int(h),
+                                "status": classify_h(h),
+                            })
+
+            if not rows:
+                st.info("No audio uploads found for the selected period.")
+            else:
+                df_all = pd.DataFrame(rows)
+                total  = len(df_all)
+                n_sub  = int((df_all["status"]=="submitted").sum())
+                n_late = int((df_all["status"]=="late").sum())
+                n_oth  = total - n_sub - n_late
+                active = df_all["user"].nunique()
+
+                # KPI strip
+                kpis2 = [
+                    ("🎙️","Total Uploads",  str(total),            "#3b82f6","rgba(59,130,246,0.12)","rgba(59,130,246,0.25)"),
+                    ("✅","On Time",        str(n_sub),            "#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
+                    ("⚡","Late",           str(n_late),           "#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
+                    ("🕐","Outside Window", str(n_oth),            "#ef4444","rgba(239,68,68,0.12)", "rgba(239,68,68,0.25)"),
+                    ("👥","Active Members", str(active),           "#8b5cf6","rgba(139,92,246,0.12)","rgba(139,92,246,0.25)"),
+                    ("📈","On-Time Rate",   f"{n_sub/total*100:.1f}%" if total else "0%","#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
+                ]
+                cols2 = st.columns(6)
+                for col, (icon,label,val,clr,bg,brd) in zip(cols2, kpis2):
+                    col.markdown(f"""
+                    <div style="background:{bg};border:1px solid {brd};border-radius:14px;
+                      padding:18px 16px;text-align:center;">
+                      <div style="font-size:22px;margin-bottom:6px;">{icon}</div>
+                      <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;
+                        color:{clr};line-height:1;">{val}</div>
+                      <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:6px;
+                        text-transform:uppercase;letter-spacing:1px;font-weight:700;">{label}</div>
+                    </div>""", unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Row 1: Daily uploads + Donut
+                r1c1, r1c2 = st.columns([2, 1])
+                with r1c1:
+                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                      color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
+                      ◈ Daily Upload Trend</div>""", unsafe_allow_html=True)
+
+                    daily = df_all.groupby(["date","status"]).size().reset_index(name="cnt")
+                    dpiv  = daily.pivot_table(index="date",columns="status",values="cnt",fill_value=0).reset_index()
+                    for c in ["submitted","late","other"]:
+                        if c not in dpiv.columns: dpiv[c] = 0
+
+                    fig_d = go.Figure()
+                    fig_d.add_trace(go.Scatter(x=dpiv["date"], y=dpiv["submitted"], name="✅ On Time",
+                        fill="tozeroy", line=dict(color="#10b981",width=2.5),
+                        fillcolor="rgba(16,185,129,0.12)", mode="lines+markers",
+                        marker=dict(size=5,color="#10b981")))
+                    fig_d.add_trace(go.Scatter(x=dpiv["date"], y=dpiv["late"], name="⚡ Late",
+                        fill="tozeroy", line=dict(color="#f59e0b",width=2.5),
+                        fillcolor="rgba(245,158,11,0.08)", mode="lines+markers",
+                        marker=dict(size=5,color="#f59e0b")))
+                    fig_d.update_layout(
+                        height=280, plot_bgcolor="rgba(13,22,41,0.0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono",size=11,color="#8899bb"),
+                        legend=dict(orientation="h",y=1.2,x=0,bgcolor="rgba(0,0,0,0)"),
+                        margin=dict(l=0,r=0,t=40,b=0),
+                        xaxis=dict(showgrid=False,linecolor="rgba(255,255,255,0.05)"),
+                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
                     )
-                    body_rows = ""
-                    for idx, (_, row) in enumerate(df_raw.iterrows()):
-                        bg = "#f9fafb" if idx % 2 else "white"
-                        body_rows += (
-                            f'<tr style="background:{bg};border-bottom:1px solid #e2e8f0;">'
-                            f'<td style="padding:10px 14px;font-weight:600;white-space:nowrap;">{row["team_name"]}</td>'
-                        )
-                        for col in session_cols:
-                            body_rows += f'<td style="padding:10px 14px;text-align:center;">{badge(row[col])}</td>'
-                        body_rows += f'<td style="padding:10px 14px;min-width:150px;">{progress_bar(row["completion"])}</td></tr>'
+                    st.plotly_chart(fig_d, use_container_width=True, config={"displayModeBar":False})
 
-                    st.markdown(f"""
-                    <div style="overflow-x:auto;border-radius:10px;
-                                box-shadow:0 4px 12px rgba(0,0,0,0.08);
-                                border:1px solid #e2e8f0;margin-top:8px;">
-                    <table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:14px;">
-                        <thead><tr>{header_html}</tr></thead>
-                        <tbody>{body_rows}</tbody>
-                    </table></div>
-                    """, unsafe_allow_html=True)
+                with r1c2:
+                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                      color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
+                      ◈ Status Split</div>""", unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    with st.expander("🛠️ Raw Record Data"):
-                        st.json(results)
+                    fig_pie = go.Figure(go.Pie(
+                        labels=["On Time","Late","Other"],
+                        values=[n_sub, n_late, n_oth],
+                        marker=dict(colors=["#10b981","#f59e0b","#475569"],
+                                    line=dict(color="#070d1a",width=3)),
+                        hole=0.62,
+                        textfont=dict(family="JetBrains Mono",size=11),
+                        textinfo="percent",
+                        hovertemplate="<b>%{label}</b><br>%{value} uploads<br>%{percent}<extra></extra>",
+                    ))
+                    fig_pie.add_annotation(text=f"<b>{total}</b><br>total", x=0.5, y=0.5,
+                        font=dict(size=16, color="#e8edf8", family="Syne"), showarrow=False)
+                    fig_pie.update_layout(
+                        height=280, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono",size=11,color="#8899bb"),
+                        legend=dict(orientation="h",y=-0.15,x=0.1,bgcolor="rgba(0,0,0,0)"),
+                        margin=dict(l=0,r=0,t=10,b=0),
+                        showlegend=True,
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True, config={"displayModeBar":False})
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Row 2: Hour heatmap + Per-team
+                r2c1, r2c2 = st.columns([1, 1])
+                with r2c1:
+                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                      color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
+                      ◈ Upload Hour Distribution (IST)</div>""", unsafe_allow_html=True)
+
+                    hc = df_all.groupby("hour_int").size().reset_index(name="cnt")
+                    all_h = pd.DataFrame({"hour_int": range(0,24)})
+                    hc = all_h.merge(hc, on="hour_int", how="left").fillna(0)
+                    def hclr(h):
+                        for s,e in [(9,9),(12,12),(13,13),(16,16)]:
+                            if s<=h<=e: return "#10b981"
+                        for s,e in [(9,10),(12,13),(14,14),(17,23)]:
+                            if s<=h<=e: return "#f59e0b"
+                        return "#2d3f5e"
+                    colors = [hclr(h) for h in hc["hour_int"]]
+                    fig_h = go.Figure(go.Bar(
+                        x=[f"{h:02d}h" for h in hc["hour_int"]],
+                        y=hc["cnt"], marker_color=colors,
+                        marker_line_width=0, marker_cornerradius=4,
+                    ))
+                    fig_h.update_layout(
+                        height=260, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono",size=10,color="#556080"),
+                        margin=dict(l=0,r=0,t=10,b=0),
+                        xaxis=dict(showgrid=False,tickangle=-45,linecolor="rgba(255,255,255,0.05)"),
+                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
+                    )
+                    st.plotly_chart(fig_h, use_container_width=True, config={"displayModeBar":False})
+                    st.markdown("""<div style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;margin-top:-12px;">
+                      🟢 On-time windows &nbsp;·&nbsp; 🟡 Late windows &nbsp;·&nbsp; ⚫ Outside all windows</div>""", unsafe_allow_html=True)
+
+                with r2c2:
+                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                      color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
+                      ◈ Uploads per Team</div>""", unsafe_allow_html=True)
+
+                    ts_grp = df_all.groupby(["team","status"]).size().reset_index(name="cnt")
+                    tp = ts_grp.pivot_table(index="team",columns="status",values="cnt",fill_value=0).reset_index()
+                    for c in ["submitted","late","other"]:
+                        if c not in tp.columns: tp[c] = 0
+
+                    fig_t = go.Figure()
+                    fig_t.add_trace(go.Bar(name="✅ On Time", x=tp["team"], y=tp["submitted"],
+                        marker=dict(color="#10b981",line=dict(width=0)), marker_cornerradius=4))
+                    fig_t.add_trace(go.Bar(name="⚡ Late", x=tp["team"], y=tp["late"],
+                        marker=dict(color="#f59e0b",line=dict(width=0)), marker_cornerradius=4))
+                    fig_t.add_trace(go.Bar(name="✕ Other", x=tp["team"], y=tp["other"],
+                        marker=dict(color="#475569",line=dict(width=0)), marker_cornerradius=4))
+                    fig_t.update_layout(
+                        barmode="stack", height=260,
+                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono",size=10,color="#556080"),
+                        legend=dict(orientation="h",y=1.2,x=0,bgcolor="rgba(0,0,0,0)",font=dict(size=10)),
+                        margin=dict(l=0,r=0,t=40,b=0),
+                        xaxis=dict(showgrid=False),
+                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
+                    )
+                    st.plotly_chart(fig_t, use_container_width=True, config={"displayModeBar":False})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TEAM MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_teams:
+    left, right = st.columns([1, 1.5], gap="large")
+
+    with left:
+        # Create team card
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#0d1629,#111d35);
+          border:1px solid rgba(255,255,255,0.08);border-radius:16px;
+          padding:22px;margin-bottom:20px;">
+          <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+            color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
+            ◈ Create New Team
+          </div>
+        """, unsafe_allow_html=True)
+
+        nt = st.text_input("Team name", placeholder="e.g. Alpha Squad", key="new_team", label_visibility="collapsed")
+        if st.button("＋  Create Team", type="primary", use_container_width=True):
+            td = load_teams()
+            if nt.strip() and nt.strip() not in [t["name"] for t in td["teams"]]:
+                td["teams"].append({"name": nt.strip(), "members": []})
+                save_teams(td)
+                st.success(f"Team **{nt.strip()}** created!")
+                st.rerun()
+            elif not nt.strip():
+                st.warning("Enter a team name.")
+            else:
+                st.warning("Team already exists.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Search + Add member card
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#0d1629,#111d35);
+          border:1px solid rgba(255,255,255,0.08);border-radius:16px;
+          padding:22px;">
+          <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+            color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
+            ◈ Add Member
+          </div>
+        """, unsafe_allow_html=True)
+
+        try:
+            from streamlit_searchbox import st_searchbox
+            def _sfn(query: str):
+                if not query or not query.strip() or not api_token: return []
+                raw = search_users(api_token, query.strip())
+                labels, rmap = [], {}
+                for u in raw:
+                    uname = u.get("username") or u.get("id") or ""
+                    display = u.get("name") or u.get("full_name") or uname
+                    lbl = f"{display} (@{uname})" if display and display != uname else uname
+                    if lbl and lbl not in rmap:
+                        labels.append(lbl)
+                        rmap[lbl] = u
+                st.session_state["_rmap"] = rmap
+                return labels
+
+            sel_lbl = st_searchbox(_sfn, key="sb",
+                placeholder="Type name or username…",
+                label="Search user", clear_on_submit=False, debounce=350)
+
+            if sel_lbl:
+                import re
+                rmap = st.session_state.get("_rmap", {})
+                matched = rmap.get(sel_lbl, {})
+                m_re = re.search(r"@(\w+)", sel_lbl)
+                uguess = matched.get("username") or (m_re.group(1) if m_re else sel_lbl.strip())
+                idguess = matched.get("id") or uguess
+                if idguess != st.session_state.get("_last_sb",""):
+                    st.session_state["_last_sb"] = idguess
+                    with st.spinner("Fetching profile…"):
+                        f = fetch_user_by_id(api_token, idguess)
+                    if f:
+                        if not f.get("id"): f["id"] = idguess
+                        st.session_state["sel_user"] = f
+                    else:
+                        st.error("Could not fetch profile.")
+
+        except ImportError:
+            st.caption("Install `streamlit-searchbox` for typeahead")
+            uq = st.text_input("Search", placeholder="Type name or username…", key="uq_input", label_visibility="collapsed")
+            if uq and uq.strip() and uq.strip() != st.session_state.get("_lq",""):
+                st.session_state["_lq"] = uq.strip()
+                st.session_state.pop("_ls","")
+                with st.spinner("Searching…"):
+                    st.session_state["_sr"] = search_users(api_token, uq.strip()) or []
+            sr = st.session_state.get("_sr",[])
+            if sr and uq and uq.strip():
+                opts = {}
+                for u in sr:
+                    un = u.get("username") or u.get("id") or ""
+                    disp = u.get("name") or u.get("full_name") or un
+                    lbl = f"{disp} (@{un})" if disp != un else un
+                    if un and lbl not in opts: opts[lbl] = u.get("id") or un
+                if opts:
+                    sl = st.radio("", list(opts.keys()), key="u_radio", horizontal=True, label_visibility="collapsed")
+                    sid = opts.get(sl,"")
+                    if sid and sid != st.session_state.get("_ls",""):
+                        st.session_state["_ls"] = sid
+                        with st.spinner(): f = fetch_user_by_id(api_token, sid)
+                        if f:
+                            if not f.get("id"): f["id"] = sid
+                            st.session_state["sel_user"] = f
+
+        # Selected user display
+        if st.session_state.get("sel_user"):
+            u   = st.session_state["sel_user"]
+            uid = u.get("id","")
+            unm = u.get("name") or u.get("full_name") or u.get("username") or uid
+            st.markdown(f"""
+            <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);
+              border-radius:12px;padding:14px 16px;margin:12px 0;display:flex;align-items:center;gap:14px;">
+              <div style="width:42px;height:42px;background:linear-gradient(135deg,#059669,#10b981);
+                border-radius:50%;display:flex;align-items:center;justify-content:center;
+                font-size:18px;flex-shrink:0;">👤</div>
+              <div>
+                <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:15px;
+                  color:#34d399;line-height:1;">{unm}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                  color:#2d6e4e;margin-top:4px;">{uid}</div>
+              </div>
+              <div style="margin-left:auto;background:rgba(16,185,129,0.15);border-radius:6px;
+                padding:4px 10px;font-size:11px;color:#34d399;font-weight:700;">SELECTED</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            ex_teams = [t["name"] for t in load_teams().get("teams",[])]
+            if ex_teams:
+                ta1, ta2 = st.columns([2,1])
+                with ta1:
+                    sel_t = st.selectbox("Assign to", ex_teams, key=f"at_{uid}", label_visibility="collapsed")
+                with ta2:
+                    if st.button("➕  Add", key=f"add_{uid}", use_container_width=True):
+                        _td = load_teams()
+                        for _t in _td["teams"]:
+                            if _t["name"] == sel_t:
+                                if uid not in _t["members"]:
+                                    _t["members"].append(uid)
+                                    save_teams(_td)
+                                    st.success(f"Added to **{sel_t}**!")
+                                    st.rerun()
+                                else:
+                                    st.info("Already a member.")
+                                break
+            else:
+                st.info("Create a team first.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Right: Team cards
+    with right:
+        st.markdown("""
+        <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+          color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px;">
+          ◈ Your Teams
+        </div>""", unsafe_allow_html=True)
+
+        td_all = load_teams()
+        if not td_all.get("teams"):
+            st.markdown("""
+            <div style="background:linear-gradient(135deg,#0d1629,#111d35);
+              border:1px dashed rgba(255,255,255,0.1);border-radius:16px;
+              padding:48px;text-align:center;">
+              <div style="font-size:40px;margin-bottom:12px;">🏗️</div>
+              <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;
+                color:#4d6fa0;">No teams yet</div>
+              <div style="font-size:13px;color:#2d3f5e;margin-top:6px;">
+                Create your first team using the panel on the left
+              </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            for i, team in enumerate(td_all["teams"]):
+                members = team.get("members", [])
+                mc = len(members)
+
+                with st.expander(
+                    f"{'🟢' if mc>0 else '⚫'}  {team['name']}  ·  {mc} member{'s' if mc!=1 else ''}",
+                    expanded=(i==0 and mc>0),
+                ):
+                    hc1, hc2 = st.columns([3,1])
+                    with hc2:
+                        if st.button("🗑️  Delete", key=f"del_{i}",
+                            help="Delete this team permanently", use_container_width=True):
+                            delete_team(team["name"])
+                            st.rerun()
+
+                    if members:
+                        st.markdown(f"""
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                          color:#556080;letter-spacing:1px;text-transform:uppercase;
+                          margin-bottom:10px;">{mc} MEMBER{'S' if mc!=1 else ''}</div>
+                        """, unsafe_allow_html=True)
+
+                        to_remove = []
+                        for mid in members:
+                            ud = fetch_user_by_id(api_token, mid) if api_token else {}
+                            mn = ud.get("name") or ud.get("full_name") or ud.get("username") or f"@{mid}"
+                            mc1, mc2 = st.columns([5,1])
+                            with mc1:
+                                st.markdown(f"""
+                                <div style="display:flex;align-items:center;gap:12px;
+                                  background:rgba(255,255,255,0.03);
+                                  border:1px solid rgba(255,255,255,0.06);
+                                  border-radius:10px;padding:10px 14px;margin-bottom:6px;
+                                  transition:all 0.2s;">
+                                  <div style="width:34px;height:34px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);
+                                    border-radius:50%;display:flex;align-items:center;justify-content:center;
+                                    font-size:14px;flex-shrink:0;">👤</div>
+                                  <div>
+                                    <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;
+                                      color:#e8edf8;">{mn}</div>
+                                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                                      color:#556080;margin-top:2px;">{mid}</div>
+                                  </div>
+                                </div>""", unsafe_allow_html=True)
+                            with mc2:
+                                st.write("")
+                                if st.button("✕", key=f"rm_{i}_{mid}", help=f"Remove {mn}"):
+                                    to_remove.append(mid)
+
+                        if to_remove:
+                            _td2 = load_teams()
+                            for _t in _td2["teams"]:
+                                if _t["name"] == team["name"]:
+                                    _t["members"] = [m for m in _t["members"] if m not in to_remove]
+                                    break
+                            save_teams(_td2)
+                            st.rerun()
+                    else:
+                        st.markdown("""
+                        <div style="text-align:center;padding:20px;color:#2d3f5e;font-size:13px;">
+                          No members yet. Search and add from the left panel.
+                        </div>""", unsafe_allow_html=True)
