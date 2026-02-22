@@ -1,27 +1,16 @@
-import streamlit as st
+from datetime import UTC, date, datetime, timedelta, timezone
+
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import date, datetime, timedelta, timezone
+import streamlit as st
 from dotenv import load_dotenv
-from fetch import fetch_user_by_id, fetch_user_audio_contributions, search_users
-from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
-from mapping import load_teams, save_teams, delete_team, get_all_teams
+
+from auth import fetch_current_user, login
+from compliance import REQUIRED_SESSIONS, get_team_slot_compliance
+from fetch import fetch_user_audio_contributions, fetch_user_by_id, search_users
+from mapping import delete_team, get_all_teams, load_teams, save_teams
 
 load_dotenv()
-
-try:
-    from auth import get_token
-    if "api_token" not in st.session_state:
-        try:
-            st.session_state["api_token"] = get_token()
-        except RuntimeError as e:
-            st.error(f"🔐 Auto-login failed: {e}")
-            st.stop()
-except ImportError:
-    if "api_token" not in st.session_state:
-        st.session_state["api_token"] = ""
-
-api_token: str = st.session_state.get("api_token", "")
 
 st.set_page_config(
     page_title="Standup Tracker · Viswam.Ai",
@@ -33,7 +22,8 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 # MASTER STYLESHEET
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&family=Nunito:wght@300;400;500;600;700&display=swap');
 
@@ -258,12 +248,137 @@ div[data-baseweb="input"] svg {
   border-radius: 6px !important;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGIN GATE
+# ─────────────────────────────────────────────────────────────────────────────
+if "api_token" not in st.session_state:
+    st.session_state["api_token"] = ""
+    st.session_state["user_info"] = {}
+
+if not st.session_state["api_token"]:
+    # ── Centred login card ──
+    _lcol1, _lcol2, _lcol3 = st.columns([1, 1.5, 1])
+    with _lcol2:
+        st.markdown(
+            """
+        <div style="
+          background: linear-gradient(135deg, #0a1628 0%, #0f2044 40%, #0d1a38 100%);
+          border: 1px solid rgba(59,130,246,0.2);
+          border-radius: 24px;
+          padding: 48px 40px 40px;
+          margin-top: 60px;
+          position: relative;
+          overflow: hidden;
+        ">
+          <!-- decorative circles -->
+          <div style="position:absolute;top:-50px;right:-50px;width:220px;height:220px;
+            background:radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);border-radius:50%;"></div>
+          <div style="position:absolute;bottom:-70px;left:10%;width:280px;height:280px;
+            background:radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%);border-radius:50%;"></div>
+
+          <div style="position:relative;z-index:1;text-align:center;">
+            <div style="
+              width:70px;height:70px;margin:0 auto 20px;
+              background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+              border-radius:18px;
+              display:flex;align-items:center;justify-content:center;
+              font-size:32px;
+              box-shadow:0 8px 32px rgba(59,130,246,0.4);
+            ">⚡</div>
+            <div style="
+              font-family:'Syne',sans-serif;
+              font-size:26px;
+              font-weight:800;
+              color:#f1f5f9;
+              letter-spacing:-0.5px;
+              line-height:1.1;
+            ">Standup Tracker</div>
+            <div style="
+              font-size:12px;color:#4d6fa0;margin-top:8px;margin-bottom:28px;
+              font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;
+            ">VISWAM.AI · SIGN IN TO CONTINUE</div>
+          </div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        # Actual login form (rendered outside the HTML div so Streamlit inputs work)
+        st.markdown(
+            """
+        <div style="
+          font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+          color:#556080;letter-spacing:1px;text-transform:uppercase;
+          margin-top:32px;margin-bottom:8px;
+        ">PHONE NUMBER</div>
+        """,
+            unsafe_allow_html=True,
+        )
+        login_phone = st.text_input(
+            "Phone",
+            placeholder="+91XXXXXXXXXX",
+            key="login_phone",
+            label_visibility="collapsed",
+        )
+
+        st.markdown(
+            """
+        <div style="
+          font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+          color:#556080;letter-spacing:1px;text-transform:uppercase;
+          margin-top:12px;margin-bottom:8px;
+        ">PASSWORD</div>
+        """,
+            unsafe_allow_html=True,
+        )
+        login_password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your password",
+            key="login_password",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        if st.button("🔐  Sign In", type="primary", use_container_width=True, key="login_btn"):
+            if not login_phone.strip() or not login_password:
+                st.warning("Please enter both phone number and password.")
+            else:
+                with st.spinner("Authenticating…"):
+                    result = login(login_phone.strip(), login_password)
+                if result["success"]:
+                    st.session_state["api_token"] = result["token"]
+                    # Fetch current user profile
+                    user_info = fetch_current_user(result["token"])
+                    st.session_state["user_info"] = user_info
+                    st.rerun()
+                else:
+                    st.error(f"Login failed: {result['message']}")
+
+        st.markdown(
+            """
+        <div style="text-align:center;margin-top:24px;font-size:12px;
+          color:#3d506e;font-family:'JetBrains Mono',monospace;">
+          ◈ Corpus API · api.corpus.swecha.org
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+    st.stop()
+
+# ── Authenticated – extract token ────────────────────────────────────────
+api_token: str = st.session_state["api_token"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HERO HEADER
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <div style="
   background: linear-gradient(135deg, #0a1628 0%, #0f2044 40%, #0d1a38 100%);
   border: 1px solid rgba(59,130,246,0.2);
@@ -300,27 +415,63 @@ st.markdown("""
     </div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("""
+    # ── Logged-in user info + Logout ──
+    user_info = st.session_state.get("user_info", {})
+    display_name = user_info.get("name") or user_info.get("username") or "User"
+    st.markdown(
+        f"""
+    <div style="display:flex;align-items:center;gap:12px;
+      background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);
+      border-radius:12px;padding:10px 14px;margin-bottom:16px;">
+      <div style="width:36px;height:36px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+        border-radius:50%;display:flex;align-items:center;justify-content:center;
+        font-size:16px;flex-shrink:0;">👤</div>
+      <div style="overflow:hidden;">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;
+          color:#e8edf8 !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          {display_name}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
+          color:#4d6fa0 !important;margin-top:2px;">● Signed in</div>
+      </div>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("🚪  Sign Out", use_container_width=True, key="logout_btn"):
+        for key in ["api_token", "user_info", "_rmap", "_last_sb", "sel_user", "_sr", "_lq", "_ls"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
     <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
       color:#e8edf8;margin-bottom:4px;letter-spacing:-0.3px;">Session Windows</div>
     <div style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;
       letter-spacing:0.5px;margin-bottom:16px;">ALL TIMES IN IST</div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     sessions = [
-        ("🌅", "Morning Standup",   "09:00–09:30", "09:30–10:30"),
-        ("🔄", "Morning Recap",     "12:00–12:30", "12:30–13:30"),
+        ("🌅", "Morning Standup", "09:00–09:30", "09:30–10:30"),
+        ("🔄", "Morning Recap", "12:00–12:30", "12:30–13:30"),
         ("☀️", "Afternoon Standup", "13:30–14:00", "14:00–15:00"),
-        ("🌆", "Afternoon Recap",   "16:30–17:00", "17:00–00:00"),
+        ("🌆", "Afternoon Recap", "16:30–17:00", "17:00–00:00"),
     ]
     for icon, name, on_time, late in sessions:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
           border-radius:10px;padding:10px 12px;margin-bottom:8px;">
           <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:#8899bb;
@@ -334,35 +485,50 @@ with st.sidebar:
               font-size:10px;color:#fbbf24;">⚡ {late}</div>
           </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("""
+    st.markdown(
+        """
     <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
       color:#556080;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">Legend</div>
-    """, unsafe_allow_html=True)
-    for icon, label, color in [("✅","Submitted — On time","#10b981"), ("⚠️","Late — Grace window","#f59e0b"), ("❌","Missing — No submission","#ef4444")]:
-        st.markdown(f"""
+    """,
+        unsafe_allow_html=True,
+    )
+    for icon, label, color in [
+        ("✅", "Submitted — On time", "#10b981"),
+        ("⚠️", "Late — Grace window", "#f59e0b"),
+        ("❌", "Missing — No submission", "#ef4444"),
+    ]:
+        st.markdown(
+            f"""
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span>{icon}</span>
           <span style="font-size:12px;color:{color};">{label}</span>
-        </div>""", unsafe_allow_html=True)
+        </div>""",
+            unsafe_allow_html=True,
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
-tab_dash, tab_analytics, tab_teams = st.tabs([
-    "⚡  Compliance",
-    "📊  Analytics",
-    "👥  Team Management",
-])
+tab_dash, tab_analytics, tab_teams = st.tabs(
+    [
+        "⚡  Compliance",
+        "📊  Analytics",
+        "👥  Team Management",
+    ]
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  COMPLIANCE DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_dash:
     # Filter bar
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background:linear-gradient(135deg,#0d1629,#111d35);
       border:1px solid rgba(255,255,255,0.08);border-radius:16px;
       padding:20px 24px;margin-bottom:24px;">
@@ -370,40 +536,53 @@ with tab_dash:
         color:#4d6fa0;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
         Filter Controls
       </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     fc1, fc2, fc3 = st.columns([1, 1.5, 1])
     with fc1:
         selected_date = st.date_input("Select Date", date.today(), key="dash_date")
     with fc2:
         all_teams_list = get_all_teams()
-        filter_team = st.multiselect("Filter Teams", ["All"] + all_teams_list, default=["All"], key="dash_teams")
+        filter_team = st.multiselect(
+            "Filter Teams", ["All"] + all_teams_list, default=["All"], key="dash_teams"
+        )
     with fc3:
         st.write("")
         run = st.button("⚡  Run Compliance Check", type="primary", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
-        teams_data   = load_teams()
-        all_usernames = list({u for t in teams_data.get("teams",[]) for u in t.get("members",[])})
+        teams_data = load_teams()
+        all_usernames = list({u for t in teams_data.get("teams", []) for u in t.get("members", [])})
 
         if not all_usernames:
             st.warning("No members found. Add members in Team Management first.")
         else:
             with st.spinner("Fetching contributions…"):
-                records_by_user = {u: fetch_user_audio_contributions(api_token, u) for u in all_usernames}
+                records_by_user = {
+                    u: fetch_user_audio_contributions(api_token, u) for u in all_usernames
+                }
 
             results = []
             for team in teams_data.get("teams", []):
-                slots     = get_team_slot_compliance(team.get("members",[]), records_by_user, selected_date)
+                slots = get_team_slot_compliance(
+                    team.get("members", []), records_by_user, selected_date
+                )
                 submitted = sum(1 for v in slots.values() if v == "submitted")
-                late      = sum(1 for v in slots.values() if v == "late")
-                missing   = len(REQUIRED_SESSIONS) - submitted - late
-                results.append({
-                    "team_name": team["name"], **slots,
-                    "submitted": submitted, "late": late, "missing": missing,
-                    "completion": (submitted / len(REQUIRED_SESSIONS)) * 100,
-                })
+                late = sum(1 for v in slots.values() if v == "late")
+                missing = len(REQUIRED_SESSIONS) - submitted - late
+                results.append(
+                    {
+                        "team_name": team["name"],
+                        **slots,
+                        "submitted": submitted,
+                        "late": late,
+                        "missing": missing,
+                        "completion": (submitted / len(REQUIRED_SESSIONS)) * 100,
+                    }
+                )
 
             df = pd.DataFrame(results)
             if "All" not in filter_team:
@@ -412,25 +591,73 @@ with tab_dash:
             if df.empty:
                 st.info("No matching teams.")
             else:
-                session_cols = ["morning_standup","morning_recap","afternoon_standup","afternoon_recap"]
-                tot_sub   = int((df[session_cols]=="submitted").sum().sum())
-                tot_late  = int((df[session_cols]=="late").sum().sum())
-                tot_miss  = int((df[session_cols]=="missing").sum().sum())
-                avg_pct   = df["completion"].mean()
-                n_perfect = int((df["completion"]==100).sum())
+                session_cols = [
+                    "morning_standup",
+                    "morning_recap",
+                    "afternoon_standup",
+                    "afternoon_recap",
+                ]
+                tot_sub = int((df[session_cols] == "submitted").sum().sum())
+                tot_late = int((df[session_cols] == "late").sum().sum())
+                tot_miss = int((df[session_cols] == "missing").sum().sum())
+                avg_pct = df["completion"].mean()
+                n_perfect = int((df["completion"] == 100).sum())
 
                 # ── KPI Strip ──
                 kpis = [
-                    ("⚡","Teams",        str(len(df)),     "#3b82f6","rgba(59,130,246,0.12)","rgba(59,130,246,0.25)"),
-                    ("✅","Submitted",    str(tot_sub),     "#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
-                    ("⚠️","Late",         str(tot_late),    "#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
-                    ("❌","Missing",      str(tot_miss),    "#ef4444","rgba(239,68,68,0.12)", "rgba(239,68,68,0.25)"),
-                    ("🏆","Perfect Teams",str(n_perfect),   "#8b5cf6","rgba(139,92,246,0.12)","rgba(139,92,246,0.25)"),
-                    ("📊","Avg Complete", f"{avg_pct:.0f}%","#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
+                    (
+                        "⚡",
+                        "Teams",
+                        str(len(df)),
+                        "#3b82f6",
+                        "rgba(59,130,246,0.12)",
+                        "rgba(59,130,246,0.25)",
+                    ),
+                    (
+                        "✅",
+                        "Submitted",
+                        str(tot_sub),
+                        "#10b981",
+                        "rgba(16,185,129,0.12)",
+                        "rgba(16,185,129,0.25)",
+                    ),
+                    (
+                        "⚠️",
+                        "Late",
+                        str(tot_late),
+                        "#f59e0b",
+                        "rgba(245,158,11,0.12)",
+                        "rgba(245,158,11,0.25)",
+                    ),
+                    (
+                        "❌",
+                        "Missing",
+                        str(tot_miss),
+                        "#ef4444",
+                        "rgba(239,68,68,0.12)",
+                        "rgba(239,68,68,0.25)",
+                    ),
+                    (
+                        "🏆",
+                        "Perfect Teams",
+                        str(n_perfect),
+                        "#8b5cf6",
+                        "rgba(139,92,246,0.12)",
+                        "rgba(139,92,246,0.25)",
+                    ),
+                    (
+                        "📊",
+                        "Avg Complete",
+                        f"{avg_pct:.0f}%",
+                        "#f59e0b",
+                        "rgba(245,158,11,0.12)",
+                        "rgba(245,158,11,0.25)",
+                    ),
                 ]
                 cols = st.columns(6)
                 for col, (icon, label, val, clr, bg, brd) in zip(cols, kpis):
-                    col.markdown(f"""
+                    col.markdown(
+                        f"""
                     <div style="background:{bg};border:1px solid {brd};border-radius:14px;
                       padding:18px 16px;text-align:center;transition:all 0.2s;">
                       <div style="font-size:22px;margin-bottom:6px;">{icon}</div>
@@ -438,37 +665,50 @@ with tab_dash:
                         color:{clr};line-height:1;">{val}</div>
                       <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:6px;
                         text-transform:uppercase;letter-spacing:1px;font-weight:700;">{label}</div>
-                    </div>""", unsafe_allow_html=True)
+                    </div>""",
+                        unsafe_allow_html=True,
+                    )
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 # ── Compliance Table ──
-                st.markdown("""
+                st.markdown(
+                    """
                 <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                   color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
                   ◈ Team Compliance Matrix
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
 
                 def badge(val):
                     if val == "submitted":
-                        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">✓ ON TIME</span>'
+                        return "<span style=\"display:inline-flex;align-items:center;gap:5px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px;\">✓ ON TIME</span>"
                     elif val == "late":
-                        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">⚡ LATE</span>'
-                    return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.3px;">✕ MISSING</span>'
+                        return "<span style=\"display:inline-flex;align-items:center;gap:5px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px;\">⚡ LATE</span>"
+                    return "<span style=\"display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px;\">✕ MISSING</span>"
 
                 def pbar(pct):
-                    if pct >= 100: fill = "linear-gradient(90deg,#059669,#10b981)"
-                    elif pct >= 50: fill = "linear-gradient(90deg,#b45309,#f59e0b)"
-                    else: fill = "linear-gradient(90deg,#b91c1c,#ef4444)"
-                    return f'''<div style="background:rgba(255,255,255,0.06);border-radius:100px;height:28px;overflow:hidden;min-width:130px;position:relative;">
+                    if pct >= 100:
+                        fill = "linear-gradient(90deg,#059669,#10b981)"
+                    elif pct >= 50:
+                        fill = "linear-gradient(90deg,#b45309,#f59e0b)"
+                    else:
+                        fill = "linear-gradient(90deg,#b91c1c,#ef4444)"
+                    return f"""<div style="background:rgba(255,255,255,0.06);border-radius:100px;height:28px;overflow:hidden;min-width:130px;position:relative;">
                       <div style="width:{pct:.0f}%;height:100%;background:{fill};border-radius:100px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;">
                         <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:white;">{pct:.0f}%</span>
                       </div>
-                    </div>'''
+                    </div>"""
 
-                session_labels = ["Morning Standup", "Morning Recap", "Afternoon Standup", "Afternoon Recap"]
+                session_labels = [
+                    "Morning Standup",
+                    "Morning Recap",
+                    "Afternoon Standup",
+                    "Afternoon Recap",
+                ]
                 th_style = "padding:12px 16px;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#4d6fa0;text-align:center;border-bottom:1px solid rgba(255,255,255,0.06);"
-                th_first = th_style.replace("text-align:center","text-align:left")
+                th_first = th_style.replace("text-align:center", "text-align:left")
 
                 thead = f'<tr><th style="{th_first}">Team</th>'
                 for lbl in session_labels:
@@ -487,46 +727,83 @@ with tab_dash:
                     tbody += f'<td style="{td_base}">{pbar(pct)}</td>'
                     tbody += "</tr>"
 
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div style="overflow-x:auto;background:linear-gradient(135deg,#0d1629,#111d35);
                   border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden;">
                   <table style="width:100%;border-collapse:collapse;font-family:'Nunito',sans-serif;">
                     <thead style="background:rgba(255,255,255,0.03);">{thead}</thead>
                     <tbody>{tbody}</tbody>
                   </table>
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 # ── Bar Chart ──
-                st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                st.markdown(
+                    """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                   color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
-                  ◈ Session Status Overview</div>""", unsafe_allow_html=True)
+                  ◈ Session Status Overview</div>""",
+                    unsafe_allow_html=True,
+                )
 
                 fig = go.Figure()
                 names = df["team_name"].tolist()
-                fig.add_trace(go.Bar(name="✅ On Time", x=names, y=df["submitted"].tolist(),
-                    marker=dict(color="#10b981", line=dict(width=0)),
-                    marker_cornerradius=6))
-                fig.add_trace(go.Bar(name="⚡ Late", x=names, y=df["late"].tolist(),
-                    marker=dict(color="#f59e0b", line=dict(width=0)),
-                    marker_cornerradius=6))
-                fig.add_trace(go.Bar(name="✕ Missing", x=names, y=df["missing"].tolist(),
-                    marker=dict(color="#ef4444", line=dict(width=0)),
-                    marker_cornerradius=6))
+                fig.add_trace(
+                    go.Bar(
+                        name="✅ On Time",
+                        x=names,
+                        y=df["submitted"].tolist(),
+                        marker=dict(color="#10b981", line=dict(width=0)),
+                        marker_cornerradius=6,
+                    )
+                )
+                fig.add_trace(
+                    go.Bar(
+                        name="⚡ Late",
+                        x=names,
+                        y=df["late"].tolist(),
+                        marker=dict(color="#f59e0b", line=dict(width=0)),
+                        marker_cornerradius=6,
+                    )
+                )
+                fig.add_trace(
+                    go.Bar(
+                        name="✕ Missing",
+                        x=names,
+                        y=df["missing"].tolist(),
+                        marker=dict(color="#ef4444", line=dict(width=0)),
+                        marker_cornerradius=6,
+                    )
+                )
                 fig.update_layout(
-                    barmode="group", height=320,
+                    barmode="group",
+                    height=320,
                     plot_bgcolor="rgba(13,22,41,0.8)",
                     paper_bgcolor="rgba(13,22,41,0.0)",
                     font=dict(family="JetBrains Mono", size=11, color="#8899bb"),
-                    legend=dict(orientation="h", y=1.15, x=0, font=dict(size=11, color="#8899bb"),
-                                bgcolor="rgba(0,0,0,0)"),
+                    legend=dict(
+                        orientation="h",
+                        y=1.15,
+                        x=0,
+                        font=dict(size=11, color="#8899bb"),
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
                     margin=dict(l=0, r=0, t=40, b=0),
-                    xaxis=dict(showgrid=False, tickfont=dict(size=12, color="#8899bb"),
-                               linecolor="rgba(255,255,255,0.06)"),
-                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)",
-                               tickfont=dict(size=11, color="#556080"),
-                               zeroline=False, title="Sessions"),
+                    xaxis=dict(
+                        showgrid=False,
+                        tickfont=dict(size=12, color="#8899bb"),
+                        linecolor="rgba(255,255,255,0.06)",
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor="rgba(255,255,255,0.05)",
+                        tickfont=dict(size=11, color="#556080"),
+                        zeroline=False,
+                        title="Sessions",
+                    ),
                 )
                 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
@@ -535,7 +812,8 @@ with tab_dash:
 #  ANALYTICS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_analytics:
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background:linear-gradient(135deg,#0d1629,#111d35);
       border:1px solid rgba(255,255,255,0.08);border-radius:16px;
       padding:20px 24px;margin-bottom:24px;">
@@ -543,25 +821,33 @@ with tab_analytics:
         color:#4d6fa0;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
         Analytics Filters
       </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     ac1, ac2, ac3 = st.columns([1, 1.5, 1])
     with ac1:
-        period = st.selectbox("Time Period", ["Last 7 days","Last 30 days","Last 3 months","Last 6 months"], index=1)
+        period = st.selectbox(
+            "Time Period",
+            ["Last 7 days", "Last 30 days", "Last 3 months", "Last 6 months"],
+            index=1,
+        )
     with ac2:
         all_teams_list2 = get_all_teams()
-        analytics_teams = st.multiselect("Teams", ["All"] + all_teams_list2, default=["All"], key="an_teams")
+        analytics_teams = st.multiselect(
+            "Teams", ["All"] + all_teams_list2, default=["All"], key="an_teams"
+        )
     with ac3:
         st.write("")
         run_an = st.button("📊  Load Analytics", type="primary", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     if run_an:
-        days_map = {"Last 7 days":7,"Last 30 days":30,"Last 3 months":90,"Last 6 months":180}
-        days     = days_map[period]
-        today    = date.today()
+        days_map = {"Last 7 days": 7, "Last 30 days": 30, "Last 3 months": 90, "Last 6 months": 180}
+        days = days_map[period]
+        today = date.today()
         start_dt = today - timedelta(days=days)
-        IST      = timezone(timedelta(hours=5, minutes=30))
+        IST = timezone(timedelta(hours=5, minutes=30))
 
         teams_data = load_teams()
         teams_to_show = teams_data.get("teams", [])
@@ -575,59 +861,110 @@ with tab_analytics:
             st.warning("No members found.")
         else:
             with st.spinner("Loading analytics data…"):
-                records_by_user = {u: fetch_user_audio_contributions(api_token, u) for u in all_members}
+                records_by_user = {
+                    u: fetch_user_audio_contributions(api_token, u) for u in all_members
+                }
 
             # Flatten + classify
             rows = []
-            submitted_w = [(9.0,9.5),(12.0,12.5),(13.5,14.0),(16.5,17.0)]
-            late_w      = [(9.5,10.5),(12.5,13.5),(14.0,15.0),(17.0,24.0)]
+            submitted_w = [(9.0, 9.5), (12.0, 12.5), (13.5, 14.0), (16.5, 17.0)]
+            late_w = [(9.5, 10.5), (12.5, 13.5), (14.0, 15.0), (17.0, 24.0)]
+
             def classify_h(h):
-                for s,e in submitted_w:
-                    if s<=h<e: return "submitted"
-                for s,e in late_w:
-                    if s<=h<e: return "late"
+                for s, e in submitted_w:
+                    if s <= h < e:
+                        return "submitted"
+                for s, e in late_w:
+                    if s <= h < e:
+                        return "late"
                 return "other"
 
             for uid, records in records_by_user.items():
                 for r in records:
                     ts = r.get("timestamp")
                     if isinstance(ts, datetime):
-                        if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=UTC)
                         ts_ist = ts.astimezone(IST)
                         rec_date = ts_ist.date()
                         if start_dt <= rec_date <= today:
-                            h = ts_ist.hour + ts_ist.minute/60
-                            rows.append({
-                                "user": uid,
-                                "team": member_to_team.get(uid,"Unassigned"),
-                                "date": rec_date,
-                                "hour": h,
-                                "hour_int": int(h),
-                                "status": classify_h(h),
-                            })
+                            h = ts_ist.hour + ts_ist.minute / 60
+                            rows.append(
+                                {
+                                    "user": uid,
+                                    "team": member_to_team.get(uid, "Unassigned"),
+                                    "date": rec_date,
+                                    "hour": h,
+                                    "hour_int": int(h),
+                                    "status": classify_h(h),
+                                }
+                            )
 
             if not rows:
                 st.info("No audio uploads found for the selected period.")
             else:
                 df_all = pd.DataFrame(rows)
-                total  = len(df_all)
-                n_sub  = int((df_all["status"]=="submitted").sum())
-                n_late = int((df_all["status"]=="late").sum())
-                n_oth  = total - n_sub - n_late
+                total = len(df_all)
+                n_sub = int((df_all["status"] == "submitted").sum())
+                n_late = int((df_all["status"] == "late").sum())
+                n_oth = total - n_sub - n_late
                 active = df_all["user"].nunique()
 
                 # KPI strip
                 kpis2 = [
-                    ("🎙️","Total Uploads",  str(total),            "#3b82f6","rgba(59,130,246,0.12)","rgba(59,130,246,0.25)"),
-                    ("✅","On Time",        str(n_sub),            "#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
-                    ("⚡","Late",           str(n_late),           "#f59e0b","rgba(245,158,11,0.12)","rgba(245,158,11,0.25)"),
-                    ("🕐","Outside Window", str(n_oth),            "#ef4444","rgba(239,68,68,0.12)", "rgba(239,68,68,0.25)"),
-                    ("👥","Active Members", str(active),           "#8b5cf6","rgba(139,92,246,0.12)","rgba(139,92,246,0.25)"),
-                    ("📈","On-Time Rate",   f"{n_sub/total*100:.1f}%" if total else "0%","#10b981","rgba(16,185,129,0.12)","rgba(16,185,129,0.25)"),
+                    (
+                        "🎙️",
+                        "Total Uploads",
+                        str(total),
+                        "#3b82f6",
+                        "rgba(59,130,246,0.12)",
+                        "rgba(59,130,246,0.25)",
+                    ),
+                    (
+                        "✅",
+                        "On Time",
+                        str(n_sub),
+                        "#10b981",
+                        "rgba(16,185,129,0.12)",
+                        "rgba(16,185,129,0.25)",
+                    ),
+                    (
+                        "⚡",
+                        "Late",
+                        str(n_late),
+                        "#f59e0b",
+                        "rgba(245,158,11,0.12)",
+                        "rgba(245,158,11,0.25)",
+                    ),
+                    (
+                        "🕐",
+                        "Outside Window",
+                        str(n_oth),
+                        "#ef4444",
+                        "rgba(239,68,68,0.12)",
+                        "rgba(239,68,68,0.25)",
+                    ),
+                    (
+                        "👥",
+                        "Active Members",
+                        str(active),
+                        "#8b5cf6",
+                        "rgba(139,92,246,0.12)",
+                        "rgba(139,92,246,0.25)",
+                    ),
+                    (
+                        "📈",
+                        "On-Time Rate",
+                        f"{n_sub / total * 100:.1f}%" if total else "0%",
+                        "#10b981",
+                        "rgba(16,185,129,0.12)",
+                        "rgba(16,185,129,0.25)",
+                    ),
                 ]
                 cols2 = st.columns(6)
-                for col, (icon,label,val,clr,bg,brd) in zip(cols2, kpis2):
-                    col.markdown(f"""
+                for col, (icon, label, val, clr, bg, brd) in zip(cols2, kpis2):
+                    col.markdown(
+                        f"""
                     <div style="background:{bg};border:1px solid {brd};border-radius:14px;
                       padding:18px 16px;text-align:center;">
                       <div style="font-size:22px;margin-bottom:6px;">{icon}</div>
@@ -635,138 +972,244 @@ with tab_analytics:
                         color:{clr};line-height:1;">{val}</div>
                       <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:6px;
                         text-transform:uppercase;letter-spacing:1px;font-weight:700;">{label}</div>
-                    </div>""", unsafe_allow_html=True)
+                    </div>""",
+                        unsafe_allow_html=True,
+                    )
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 # Row 1: Daily uploads + Donut
                 r1c1, r1c2 = st.columns([2, 1])
                 with r1c1:
-                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                    st.markdown(
+                        """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                       color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
-                      ◈ Daily Upload Trend</div>""", unsafe_allow_html=True)
+                      ◈ Daily Upload Trend</div>""",
+                        unsafe_allow_html=True,
+                    )
 
-                    daily = df_all.groupby(["date","status"]).size().reset_index(name="cnt")
-                    dpiv  = daily.pivot_table(index="date",columns="status",values="cnt",fill_value=0).reset_index()
-                    for c in ["submitted","late","other"]:
-                        if c not in dpiv.columns: dpiv[c] = 0
+                    daily = df_all.groupby(["date", "status"]).size().reset_index(name="cnt")
+                    dpiv = daily.pivot_table(
+                        index="date", columns="status", values="cnt", fill_value=0
+                    ).reset_index()
+                    for c in ["submitted", "late", "other"]:
+                        if c not in dpiv.columns:
+                            dpiv[c] = 0
 
                     fig_d = go.Figure()
-                    fig_d.add_trace(go.Scatter(x=dpiv["date"], y=dpiv["submitted"], name="✅ On Time",
-                        fill="tozeroy", line=dict(color="#10b981",width=2.5),
-                        fillcolor="rgba(16,185,129,0.12)", mode="lines+markers",
-                        marker=dict(size=5,color="#10b981")))
-                    fig_d.add_trace(go.Scatter(x=dpiv["date"], y=dpiv["late"], name="⚡ Late",
-                        fill="tozeroy", line=dict(color="#f59e0b",width=2.5),
-                        fillcolor="rgba(245,158,11,0.08)", mode="lines+markers",
-                        marker=dict(size=5,color="#f59e0b")))
-                    fig_d.update_layout(
-                        height=280, plot_bgcolor="rgba(13,22,41,0.0)", paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(family="JetBrains Mono",size=11,color="#8899bb"),
-                        legend=dict(orientation="h",y=1.2,x=0,bgcolor="rgba(0,0,0,0)"),
-                        margin=dict(l=0,r=0,t=40,b=0),
-                        xaxis=dict(showgrid=False,linecolor="rgba(255,255,255,0.05)"),
-                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
+                    fig_d.add_trace(
+                        go.Scatter(
+                            x=dpiv["date"],
+                            y=dpiv["submitted"],
+                            name="✅ On Time",
+                            fill="tozeroy",
+                            line=dict(color="#10b981", width=2.5),
+                            fillcolor="rgba(16,185,129,0.12)",
+                            mode="lines+markers",
+                            marker=dict(size=5, color="#10b981"),
+                        )
                     )
-                    st.plotly_chart(fig_d, use_container_width=True, config={"displayModeBar":False})
+                    fig_d.add_trace(
+                        go.Scatter(
+                            x=dpiv["date"],
+                            y=dpiv["late"],
+                            name="⚡ Late",
+                            fill="tozeroy",
+                            line=dict(color="#f59e0b", width=2.5),
+                            fillcolor="rgba(245,158,11,0.08)",
+                            mode="lines+markers",
+                            marker=dict(size=5, color="#f59e0b"),
+                        )
+                    )
+                    fig_d.update_layout(
+                        height=280,
+                        plot_bgcolor="rgba(13,22,41,0.0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono", size=11, color="#8899bb"),
+                        legend=dict(orientation="h", y=1.2, x=0, bgcolor="rgba(0,0,0,0)"),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                        xaxis=dict(showgrid=False, linecolor="rgba(255,255,255,0.05)"),
+                        yaxis=dict(
+                            showgrid=True, gridcolor="rgba(255,255,255,0.04)", zeroline=False
+                        ),
+                    )
+                    st.plotly_chart(
+                        fig_d, use_container_width=True, config={"displayModeBar": False}
+                    )
 
                 with r1c2:
-                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                    st.markdown(
+                        """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                       color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
-                      ◈ Status Split</div>""", unsafe_allow_html=True)
+                      ◈ Status Split</div>""",
+                        unsafe_allow_html=True,
+                    )
 
-                    fig_pie = go.Figure(go.Pie(
-                        labels=["On Time","Late","Other"],
-                        values=[n_sub, n_late, n_oth],
-                        marker=dict(colors=["#10b981","#f59e0b","#475569"],
-                                    line=dict(color="#070d1a",width=3)),
-                        hole=0.62,
-                        textfont=dict(family="JetBrains Mono",size=11),
-                        textinfo="percent",
-                        hovertemplate="<b>%{label}</b><br>%{value} uploads<br>%{percent}<extra></extra>",
-                    ))
-                    fig_pie.add_annotation(text=f"<b>{total}</b><br>total", x=0.5, y=0.5,
-                        font=dict(size=16, color="#e8edf8", family="Syne"), showarrow=False)
+                    fig_pie = go.Figure(
+                        go.Pie(
+                            labels=["On Time", "Late", "Other"],
+                            values=[n_sub, n_late, n_oth],
+                            marker=dict(
+                                colors=["#10b981", "#f59e0b", "#475569"],
+                                line=dict(color="#070d1a", width=3),
+                            ),
+                            hole=0.62,
+                            textfont=dict(family="JetBrains Mono", size=11),
+                            textinfo="percent",
+                            hovertemplate="<b>%{label}</b><br>%{value} uploads<br>%{percent}<extra></extra>",
+                        )
+                    )
+                    fig_pie.add_annotation(
+                        text=f"<b>{total}</b><br>total",
+                        x=0.5,
+                        y=0.5,
+                        font=dict(size=16, color="#e8edf8", family="Syne"),
+                        showarrow=False,
+                    )
                     fig_pie.update_layout(
-                        height=280, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(family="JetBrains Mono",size=11,color="#8899bb"),
-                        legend=dict(orientation="h",y=-0.15,x=0.1,bgcolor="rgba(0,0,0,0)"),
-                        margin=dict(l=0,r=0,t=10,b=0),
+                        height=280,
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono", size=11, color="#8899bb"),
+                        legend=dict(orientation="h", y=-0.15, x=0.1, bgcolor="rgba(0,0,0,0)"),
+                        margin=dict(l=0, r=0, t=10, b=0),
                         showlegend=True,
                     )
-                    st.plotly_chart(fig_pie, use_container_width=True, config={"displayModeBar":False})
+                    st.plotly_chart(
+                        fig_pie, use_container_width=True, config={"displayModeBar": False}
+                    )
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 # Row 2: Hour heatmap + Per-team
                 r2c1, r2c2 = st.columns([1, 1])
                 with r2c1:
-                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                    st.markdown(
+                        """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                       color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
-                      ◈ Upload Hour Distribution (IST)</div>""", unsafe_allow_html=True)
+                      ◈ Upload Hour Distribution (IST)</div>""",
+                        unsafe_allow_html=True,
+                    )
 
                     hc = df_all.groupby("hour_int").size().reset_index(name="cnt")
-                    all_h = pd.DataFrame({"hour_int": range(0,24)})
+                    all_h = pd.DataFrame({"hour_int": range(0, 24)})
                     hc = all_h.merge(hc, on="hour_int", how="left").fillna(0)
+
                     def hclr(h):
-                        for s,e in [(9,9),(12,12),(13,13),(16,16)]:
-                            if s<=h<=e: return "#10b981"
-                        for s,e in [(9,10),(12,13),(14,14),(17,23)]:
-                            if s<=h<=e: return "#f59e0b"
+                        for s, e in [(9, 9), (12, 12), (13, 13), (16, 16)]:
+                            if s <= h <= e:
+                                return "#10b981"
+                        for s, e in [(9, 10), (12, 13), (14, 14), (17, 23)]:
+                            if s <= h <= e:
+                                return "#f59e0b"
                         return "#2d3f5e"
+
                     colors = [hclr(h) for h in hc["hour_int"]]
-                    fig_h = go.Figure(go.Bar(
-                        x=[f"{h:02d}h" for h in hc["hour_int"]],
-                        y=hc["cnt"], marker_color=colors,
-                        marker_line_width=0, marker_cornerradius=4,
-                    ))
-                    fig_h.update_layout(
-                        height=260, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(family="JetBrains Mono",size=10,color="#556080"),
-                        margin=dict(l=0,r=0,t=10,b=0),
-                        xaxis=dict(showgrid=False,tickangle=-45,linecolor="rgba(255,255,255,0.05)"),
-                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
+                    fig_h = go.Figure(
+                        go.Bar(
+                            x=[f"{h:02d}h" for h in hc["hour_int"]],
+                            y=hc["cnt"],
+                            marker_color=colors,
+                            marker_line_width=0,
+                            marker_cornerradius=4,
+                        )
                     )
-                    st.plotly_chart(fig_h, use_container_width=True, config={"displayModeBar":False})
-                    st.markdown("""<div style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;margin-top:-12px;">
-                      🟢 On-time windows &nbsp;·&nbsp; 🟡 Late windows &nbsp;·&nbsp; ⚫ Outside all windows</div>""", unsafe_allow_html=True)
+                    fig_h.update_layout(
+                        height=260,
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono", size=10, color="#556080"),
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        xaxis=dict(
+                            showgrid=False, tickangle=-45, linecolor="rgba(255,255,255,0.05)"
+                        ),
+                        yaxis=dict(
+                            showgrid=True, gridcolor="rgba(255,255,255,0.04)", zeroline=False
+                        ),
+                    )
+                    st.plotly_chart(
+                        fig_h, use_container_width=True, config={"displayModeBar": False}
+                    )
+                    st.markdown(
+                        """<div style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;margin-top:-12px;">
+                      🟢 On-time windows &nbsp;·&nbsp; 🟡 Late windows &nbsp;·&nbsp; ⚫ Outside all windows</div>""",
+                        unsafe_allow_html=True,
+                    )
 
                 with r2c2:
-                    st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                    st.markdown(
+                        """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                       color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;">
-                      ◈ Uploads per Team</div>""", unsafe_allow_html=True)
+                      ◈ Uploads per Team</div>""",
+                        unsafe_allow_html=True,
+                    )
 
-                    ts_grp = df_all.groupby(["team","status"]).size().reset_index(name="cnt")
-                    tp = ts_grp.pivot_table(index="team",columns="status",values="cnt",fill_value=0).reset_index()
-                    for c in ["submitted","late","other"]:
-                        if c not in tp.columns: tp[c] = 0
+                    ts_grp = df_all.groupby(["team", "status"]).size().reset_index(name="cnt")
+                    tp = ts_grp.pivot_table(
+                        index="team", columns="status", values="cnt", fill_value=0
+                    ).reset_index()
+                    for c in ["submitted", "late", "other"]:
+                        if c not in tp.columns:
+                            tp[c] = 0
 
                     fig_t = go.Figure()
-                    fig_t.add_trace(go.Bar(name="✅ On Time", x=tp["team"], y=tp["submitted"],
-                        marker=dict(color="#10b981",line=dict(width=0)), marker_cornerradius=4))
-                    fig_t.add_trace(go.Bar(name="⚡ Late", x=tp["team"], y=tp["late"],
-                        marker=dict(color="#f59e0b",line=dict(width=0)), marker_cornerradius=4))
-                    fig_t.add_trace(go.Bar(name="✕ Other", x=tp["team"], y=tp["other"],
-                        marker=dict(color="#475569",line=dict(width=0)), marker_cornerradius=4))
-                    fig_t.update_layout(
-                        barmode="stack", height=260,
-                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(family="JetBrains Mono",size=10,color="#556080"),
-                        legend=dict(orientation="h",y=1.2,x=0,bgcolor="rgba(0,0,0,0)",font=dict(size=10)),
-                        margin=dict(l=0,r=0,t=40,b=0),
-                        xaxis=dict(showgrid=False),
-                        yaxis=dict(showgrid=True,gridcolor="rgba(255,255,255,0.04)",zeroline=False),
+                    fig_t.add_trace(
+                        go.Bar(
+                            name="✅ On Time",
+                            x=tp["team"],
+                            y=tp["submitted"],
+                            marker=dict(color="#10b981", line=dict(width=0)),
+                            marker_cornerradius=4,
+                        )
                     )
-                    st.plotly_chart(fig_t, use_container_width=True, config={"displayModeBar":False})
+                    fig_t.add_trace(
+                        go.Bar(
+                            name="⚡ Late",
+                            x=tp["team"],
+                            y=tp["late"],
+                            marker=dict(color="#f59e0b", line=dict(width=0)),
+                            marker_cornerradius=4,
+                        )
+                    )
+                    fig_t.add_trace(
+                        go.Bar(
+                            name="✕ Other",
+                            x=tp["team"],
+                            y=tp["other"],
+                            marker=dict(color="#475569", line=dict(width=0)),
+                            marker_cornerradius=4,
+                        )
+                    )
+                    fig_t.update_layout(
+                        barmode="stack",
+                        height=260,
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono", size=10, color="#556080"),
+                        legend=dict(
+                            orientation="h", y=1.2, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=10)
+                        ),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                        xaxis=dict(showgrid=False),
+                        yaxis=dict(
+                            showgrid=True, gridcolor="rgba(255,255,255,0.04)", zeroline=False
+                        ),
+                    )
+                    st.plotly_chart(
+                        fig_t, use_container_width=True, config={"displayModeBar": False}
+                    )
 
                 # ── Per-person upload heatmap (date × member, color = upload count) ──
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                st.markdown(
+                    """<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
                   color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">
                   ◈ Member Activity Heatmap</div>
                   <div style="font-size:12px;color:#556080;font-family:'JetBrains Mono',monospace;
                   margin-bottom:14px;">audio uploads per person · per day · grouped by team</div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
 
                 # Team selector for heatmap
                 unique_teams = sorted(df_all["team"].unique().tolist())
@@ -795,12 +1238,8 @@ with tab_analytics:
                     hm_df["member"] = hm_df["user"].map(uid_to_name)
 
                     # Build pivot: rows = members, cols = dates, values = upload count
-                    hm_pivot = (
-                        hm_df.groupby(["member", "date"])
-                        .size()
-                        .reset_index(name="uploads")
-                    )
-                    all_dates  = sorted(hm_df["date"].unique())
+                    hm_pivot = hm_df.groupby(["member", "date"]).size().reset_index(name="uploads")
+                    all_dates = sorted(hm_df["date"].unique())
                     all_members_hm = sorted(hm_df["member"].unique())
 
                     # Full grid (fill missing with 0)
@@ -820,9 +1259,11 @@ with tab_analytics:
                         row_hover = []
                         for d in matrix.columns:
                             cnt = int(matrix.loc[mem, d])
-                            status_breakdown = hm_df[
-                                (hm_df["member"] == mem) & (hm_df["date"] == d)
-                            ]["status"].value_counts().to_dict()
+                            status_breakdown = (
+                                hm_df[(hm_df["member"] == mem) & (hm_df["date"] == d)]["status"]
+                                .value_counts()
+                                .to_dict()
+                            )
                             s = status_breakdown.get("submitted", 0)
                             l = status_breakdown.get("late", 0)
                             o = status_breakdown.get("other", 0)
@@ -841,33 +1282,38 @@ with tab_analytics:
                     cell_h = max(36, min(56, 400 // max(len(all_members_hm), 1)))
                     fig_hm_h = max(300, len(all_members_hm) * cell_h + 120)
 
-                    fig_hm = go.Figure(go.Heatmap(
-                        z=matrix.values.tolist(),
-                        x=date_labels,
-                        y=matrix.index.tolist(),
-                        text=hover_text,
-                        hovertemplate="%{text}<extra></extra>",
-                        colorscale=[
-                            [0.0,  "rgba(13,22,41,1)"],
-                            [0.01, "rgba(21,36,70,1)"],
-                            [0.25, "rgba(29,78,216,0.6)"],
-                            [0.5,  "rgba(16,185,129,0.75)"],
-                            [0.75, "rgba(245,158,11,0.85)"],
-                            [1.0,  "rgba(239,68,68,1)"],
-                        ],
-                        showscale=True,
-                        colorbar=dict(
-                            title=dict(text="Uploads", font=dict(size=11, color="#8899bb", family="JetBrains Mono")),
-                            tickfont=dict(size=10, color="#8899bb", family="JetBrains Mono"),
-                            bgcolor="rgba(0,0,0,0)",
-                            outlinecolor="rgba(255,255,255,0.08)",
-                            outlinewidth=1,
-                            thickness=12,
-                            len=0.8,
-                        ),
-                        xgap=3,
-                        ygap=3,
-                    ))
+                    fig_hm = go.Figure(
+                        go.Heatmap(
+                            z=matrix.values.tolist(),
+                            x=date_labels,
+                            y=matrix.index.tolist(),
+                            text=hover_text,
+                            hovertemplate="%{text}<extra></extra>",
+                            colorscale=[
+                                [0.0, "rgba(13,22,41,1)"],
+                                [0.01, "rgba(21,36,70,1)"],
+                                [0.25, "rgba(29,78,216,0.6)"],
+                                [0.5, "rgba(16,185,129,0.75)"],
+                                [0.75, "rgba(245,158,11,0.85)"],
+                                [1.0, "rgba(239,68,68,1)"],
+                            ],
+                            showscale=True,
+                            colorbar=dict(
+                                title=dict(
+                                    text="Uploads",
+                                    font=dict(size=11, color="#8899bb", family="JetBrains Mono"),
+                                ),
+                                tickfont=dict(size=10, color="#8899bb", family="JetBrains Mono"),
+                                bgcolor="rgba(0,0,0,0)",
+                                outlinecolor="rgba(255,255,255,0.08)",
+                                outlinewidth=1,
+                                thickness=12,
+                                len=0.8,
+                            ),
+                            xgap=3,
+                            ygap=3,
+                        )
+                    )
 
                     fig_hm.update_layout(
                         height=fig_hm_h,
@@ -890,10 +1336,13 @@ with tab_analytics:
                         ),
                     )
 
-                    st.plotly_chart(fig_hm, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(
+                        fig_hm, use_container_width=True, config={"displayModeBar": False}
+                    )
 
                     # Legend strip below heatmap
-                    st.markdown("""
+                    st.markdown(
+                        """
                     <div style="display:flex;gap:20px;align-items:center;margin-top:-8px;flex-wrap:wrap;">
                       <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#556080;">Color scale:</div>
                       <div style="display:flex;align-items:center;gap:6px;">
@@ -917,7 +1366,9 @@ with tab_analytics:
                         <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">very high</span>
                       </div>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -928,7 +1379,8 @@ with tab_teams:
 
     with left:
         # Create team card
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background:linear-gradient(135deg,#0d1629,#111d35);
           border:1px solid rgba(255,255,255,0.08);border-radius:16px;
           padding:22px;margin-bottom:20px;">
@@ -936,9 +1388,16 @@ with tab_teams:
             color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
             ◈ Create New Team
           </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
-        nt = st.text_input("Team name", placeholder="e.g. Alpha Squad", key="new_team", label_visibility="collapsed")
+        nt = st.text_input(
+            "Team name",
+            placeholder="e.g. Alpha Squad",
+            key="new_team",
+            label_visibility="collapsed",
+        )
         if st.button("＋  Create Team", type="primary", use_container_width=True):
             td = load_teams()
             if nt.strip() and nt.strip() not in [t["name"] for t in td["teams"]]:
@@ -953,7 +1412,8 @@ with tab_teams:
         st.markdown("</div>", unsafe_allow_html=True)
 
         # Search + Add member card
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background:linear-gradient(135deg,#0d1629,#111d35);
           border:1px solid rgba(255,255,255,0.08);border-radius:16px;
           padding:22px;">
@@ -961,12 +1421,16 @@ with tab_teams:
             color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
             ◈ Add Member
           </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
         try:
             from streamlit_searchbox import st_searchbox
+
             def _sfn(query: str):
-                if not query or not query.strip() or not api_token: return []
+                if not query or not query.strip() or not api_token:
+                    return []
                 raw = search_users(api_token, query.strip())
                 labels, rmap = [], {}
                 for u in raw:
@@ -979,59 +1443,81 @@ with tab_teams:
                 st.session_state["_rmap"] = rmap
                 return labels
 
-            sel_lbl = st_searchbox(_sfn, key="sb",
+            sel_lbl = st_searchbox(
+                _sfn,
+                key="sb",
                 placeholder="Type name or username…",
-                label="Search user", clear_on_submit=False, debounce=350)
+                label="Search user",
+                clear_on_submit=False,
+                debounce=350,
+            )
 
             if sel_lbl:
                 import re
+
                 rmap = st.session_state.get("_rmap", {})
                 matched = rmap.get(sel_lbl, {})
                 m_re = re.search(r"@(\w+)", sel_lbl)
                 uguess = matched.get("username") or (m_re.group(1) if m_re else sel_lbl.strip())
                 idguess = matched.get("id") or uguess
-                if idguess != st.session_state.get("_last_sb",""):
+                if idguess != st.session_state.get("_last_sb", ""):
                     st.session_state["_last_sb"] = idguess
                     with st.spinner("Fetching profile…"):
                         f = fetch_user_by_id(api_token, idguess)
                     if f:
-                        if not f.get("id"): f["id"] = idguess
+                        if not f.get("id"):
+                            f["id"] = idguess
                         st.session_state["sel_user"] = f
                     else:
                         st.error("Could not fetch profile.")
 
         except ImportError:
             st.caption("Install `streamlit-searchbox` for typeahead")
-            uq = st.text_input("Search", placeholder="Type name or username…", key="uq_input", label_visibility="collapsed")
-            if uq and uq.strip() and uq.strip() != st.session_state.get("_lq",""):
+            uq = st.text_input(
+                "Search",
+                placeholder="Type name or username…",
+                key="uq_input",
+                label_visibility="collapsed",
+            )
+            if uq and uq.strip() and uq.strip() != st.session_state.get("_lq", ""):
                 st.session_state["_lq"] = uq.strip()
-                st.session_state.pop("_ls","")
+                st.session_state.pop("_ls", "")
                 with st.spinner("Searching…"):
                     st.session_state["_sr"] = search_users(api_token, uq.strip()) or []
-            sr = st.session_state.get("_sr",[])
+            sr = st.session_state.get("_sr", [])
             if sr and uq and uq.strip():
                 opts = {}
                 for u in sr:
                     un = u.get("username") or u.get("id") or ""
                     disp = u.get("name") or u.get("full_name") or un
                     lbl = f"{disp} (@{un})" if disp != un else un
-                    if un and lbl not in opts: opts[lbl] = u.get("id") or un
+                    if un and lbl not in opts:
+                        opts[lbl] = u.get("id") or un
                 if opts:
-                    sl = st.radio("", list(opts.keys()), key="u_radio", horizontal=True, label_visibility="collapsed")
-                    sid = opts.get(sl,"")
-                    if sid and sid != st.session_state.get("_ls",""):
+                    sl = st.radio(
+                        "",
+                        list(opts.keys()),
+                        key="u_radio",
+                        horizontal=True,
+                        label_visibility="collapsed",
+                    )
+                    sid = opts.get(sl, "")
+                    if sid and sid != st.session_state.get("_ls", ""):
                         st.session_state["_ls"] = sid
-                        with st.spinner(): f = fetch_user_by_id(api_token, sid)
+                        with st.spinner():
+                            f = fetch_user_by_id(api_token, sid)
                         if f:
-                            if not f.get("id"): f["id"] = sid
+                            if not f.get("id"):
+                                f["id"] = sid
                             st.session_state["sel_user"] = f
 
         # Selected user display
         if st.session_state.get("sel_user"):
-            u   = st.session_state["sel_user"]
-            uid = u.get("id","")
+            u = st.session_state["sel_user"]
+            uid = u.get("id", "")
             unm = u.get("name") or u.get("full_name") or u.get("username") or uid
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);
               border-radius:12px;padding:14px 16px;margin:12px 0;display:flex;align-items:center;gap:14px;">
               <div style="width:42px;height:42px;background:linear-gradient(135deg,#059669,#10b981);
@@ -1046,13 +1532,17 @@ with tab_teams:
               <div style="margin-left:auto;background:rgba(16,185,129,0.15);border-radius:6px;
                 padding:4px 10px;font-size:11px;color:#34d399;font-weight:700;">SELECTED</div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
-            ex_teams = [t["name"] for t in load_teams().get("teams",[])]
+            ex_teams = [t["name"] for t in load_teams().get("teams", [])]
             if ex_teams:
-                ta1, ta2 = st.columns([2,1])
+                ta1, ta2 = st.columns([2, 1])
                 with ta1:
-                    sel_t = st.selectbox("Assign to", ex_teams, key=f"at_{uid}", label_visibility="collapsed")
+                    sel_t = st.selectbox(
+                        "Assign to", ex_teams, key=f"at_{uid}", label_visibility="collapsed"
+                    )
                 with ta2:
                     if st.button("➕  Add", key=f"add_{uid}", use_container_width=True):
                         _td = load_teams()
@@ -1073,15 +1563,19 @@ with tab_teams:
 
     # Right: Team cards
     with right:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
           color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px;">
           ◈ Your Teams
-        </div>""", unsafe_allow_html=True)
+        </div>""",
+            unsafe_allow_html=True,
+        )
 
         td_all = load_teams()
         if not td_all.get("teams"):
-            st.markdown("""
+            st.markdown(
+                """
             <div style="background:linear-gradient(135deg,#0d1629,#111d35);
               border:1px dashed rgba(255,255,255,0.1);border-radius:16px;
               padding:48px;text-align:center;">
@@ -1091,37 +1585,52 @@ with tab_teams:
               <div style="font-size:13px;color:#2d3f5e;margin-top:6px;">
                 Create your first team using the panel on the left
               </div>
-            </div>""", unsafe_allow_html=True)
+            </div>""",
+                unsafe_allow_html=True,
+            )
         else:
             for i, team in enumerate(td_all["teams"]):
                 members = team.get("members", [])
                 mc = len(members)
 
                 with st.expander(
-                    f"{'🟢' if mc>0 else '⚫'}  {team['name']}  ·  {mc} member{'s' if mc!=1 else ''}",
-                    expanded=(i==0 and mc>0),
+                    f"{'🟢' if mc > 0 else '⚫'}  {team['name']}  ·  {mc} member{'s' if mc != 1 else ''}",
+                    expanded=(i == 0 and mc > 0),
                 ):
-                    hc1, hc2 = st.columns([3,1])
+                    hc1, hc2 = st.columns([3, 1])
                     with hc2:
-                        if st.button("🗑️  Delete", key=f"del_{i}",
-                            help="Delete this team permanently", use_container_width=True):
+                        if st.button(
+                            "🗑️  Delete",
+                            key=f"del_{i}",
+                            help="Delete this team permanently",
+                            use_container_width=True,
+                        ):
                             delete_team(team["name"])
                             st.rerun()
 
                     if members:
-                        st.markdown(f"""
+                        st.markdown(
+                            f"""
                         <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
                           color:#556080;letter-spacing:1px;text-transform:uppercase;
-                          margin-bottom:10px;">{mc} MEMBER{'S' if mc!=1 else ''}</div>
-                        """, unsafe_allow_html=True)
+                          margin-bottom:10px;">{mc} MEMBER{"S" if mc != 1 else ""}</div>
+                        """,
+                            unsafe_allow_html=True,
+                        )
 
                         to_remove = []
                         for mid in members:
                             ud = fetch_user_by_id(api_token, mid) if api_token else {}
-                            mn = ud.get("name") or ud.get("full_name") or ud.get("username") or f"@{mid}"
-                            mc1, mc2 = st.columns([5,1])
+                            mn = (
+                                ud.get("name")
+                                or ud.get("full_name")
+                                or ud.get("username")
+                                or f"@{mid}"
+                            )
+                            mc1, mc2 = st.columns([5, 1])
                             with mc1:
-                                st.markdown(f"""
+                                st.markdown(
+                                    f"""
                                 <div style="display:flex;align-items:center;gap:12px;
                                   background:rgba(255,255,255,0.03);
                                   border:1px solid rgba(255,255,255,0.06);
@@ -1136,7 +1645,9 @@ with tab_teams:
                                     <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
                                       color:#556080;margin-top:2px;">{mid}</div>
                                   </div>
-                                </div>""", unsafe_allow_html=True)
+                                </div>""",
+                                    unsafe_allow_html=True,
+                                )
                             with mc2:
                                 st.write("")
                                 if st.button("✕", key=f"rm_{i}_{mid}", help=f"Remove {mn}"):
@@ -1151,7 +1662,10 @@ with tab_teams:
                             save_teams(_td2)
                             st.rerun()
                     else:
-                        st.markdown("""
+                        st.markdown(
+                            """
                         <div style="text-align:center;padding:20px;color:#2d3f5e;font-size:13px;">
                           No members yet. Search and add from the left panel.
-                        </div>""", unsafe_allow_html=True)
+                        </div>""",
+                            unsafe_allow_html=True,
+                        )
