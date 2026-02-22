@@ -1,9 +1,13 @@
+import os
 import streamlit as st
 import pandas as pd
 from datetime import date
+from dotenv import load_dotenv
 from fetch import fetch_records, fetch_users, fetch_categories, fetch_user_by_id
 from compliance import calculate_compliance
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
+
+load_dotenv()  # Load .env at app startup
 
 # Page config
 st.set_page_config(page_title="Standup Tracker | Viswam.Ai", page_icon="🚀", layout="wide")
@@ -26,7 +30,8 @@ st.caption("Viswam.Ai - Swecha Corpus Backend Powered")
 # Sidebar
 with st.sidebar:
     st.header("🔑 Auth")
-    api_token = st.text_input("Bearer Token", type="password")
+    _default_token = os.getenv("API_TOKEN", "")
+    api_token = st.text_input("Bearer Token", value=_default_token, type="password")
     st.divider()
     st.info("Assign members locally in the 'Team Management' tab.")
 
@@ -38,9 +43,12 @@ with tab_mgmt:
     
     # API Settings in Expander
     with st.expander("⚙️ API Configuration", expanded=False):
-        st.text_input("Standup Category ID", key="standup_cat_id")
-        st.text_input("Internship Category ID", key="internship_cat_id")
-        st.number_input("Fetch Limit", min_value=10, max_value=2000, value=500, key="fetch_limit")
+        _default_standup_id = os.getenv("STANDUP_CATEGORY_ID", "")
+        _default_internship_id = os.getenv("INTERNSHIP_CATEGORY_ID", "")
+        _default_fetch_limit = int(os.getenv("FETCH_LIMIT", "500"))
+        st.text_input("Standup Category ID", value=_default_standup_id, key="standup_cat_id")
+        st.text_input("Internship Category ID", value=_default_internship_id, key="internship_cat_id")
+        st.number_input("Fetch Limit", min_value=10, max_value=2000, value=_default_fetch_limit, key="fetch_limit")
         if st.button("🔍 Find Category IDs"):
             if api_token:
                 cats = fetch_categories(api_token)

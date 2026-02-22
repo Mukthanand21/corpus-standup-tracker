@@ -1,8 +1,12 @@
+import os
 import requests
 import streamlit as st
 from typing import List, Dict, Any
+from dotenv import load_dotenv
 
-BASE_URL = "https://api.corpus.swecha.org/api/v1"
+load_dotenv()  # Load variables from .env into os.environ
+
+BASE_URL = os.getenv("BASE_URL", "https://api.corpus.swecha.org/api/v1")
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_records(token: str, target_date: str = None, category_id: str = None, limit: int = 200) -> List[Dict[str, Any]]:
