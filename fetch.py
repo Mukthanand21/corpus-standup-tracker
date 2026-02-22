@@ -32,6 +32,26 @@ def fetch_user_by_id(token: str, user_id: str) -> Dict[str, Any]:
         print(f"Error fetching user {user_id}: {e}")
         return {}
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def search_users(token: str, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Search users by similarity with username.
+    Endpoint: GET /api/v1/users/search?query={query}&limit={limit}
+    
+    Returns a list of users matching the query.
+    Cached for 10 minutes.
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"query": query, "limit": min(limit, 100)}
+    try:
+        response = requests.get(f"{BASE_URL}/users/search", headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error searching users with query '{query}': {e}")
+        return []
+
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_categories(token: str) -> List[Dict[str, Any]]:
     """

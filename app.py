@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from dotenv import load_dotenv
-from fetch import fetch_user_by_id, fetch_user_audio_contributions
+from fetch import fetch_user_by_id, fetch_user_audio_contributions, search_users
 from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
 
@@ -41,78 +41,110 @@ tab_dashboard, tab_mgmt = st.tabs(["📊 Compliance Dashboard", "👥 Team Manag
 with tab_mgmt:
     st.header("Team & Member Setup")
     
-    # 1. Fetch User by ID
+    # 1. Search Users by username
     st.subheader("👤 User Management")
-    u_id_search = st.text_input("Search User", placeholder="Enter username to fetch details")
-    if st.button("🔍 Fetch"):
-        if api_token and u_id_search:
-            with st.spinner("Looking up user..."):
-                user = fetch_user_by_id(api_token, u_id_search.strip())
+    u_id_search = st.text_input("Search User", placeholder="Enter username to search")
+    search_clicked = st.button("🔍 Search")
+    
+    if search_clicked and api_token and u_id_search:
+        with st.spinner("Searching users..."):
+            # Uses default limit=10
+            search_results = search_users(api_token, u_id_search.strip())
+        if search_results:
+            if 'search_results' not in st.session_state:
+                st.session_state['search_results'] = []
+            st.session_state['search_results'] = search_results
+            st.session_state['selected_user'] = None
+        else:
+            st.session_state.pop('search_results', None)
+            st.session_state.pop('selected_user', None)
+            st.warning("No users found matching the query.")
+    elif search_clicked and not u_id_search:
+        st.warning("Please enter a search query.")
+
+    # Show search results and allow user selection
+    if 'search_results' in st.session_state and st.session_state['search_results']:
+        st.markdown("**Search Results:**")
+        results = st.session_state['search_results']
+        
+        # Create options for selection
+        user_options = {}
+        for u in results:
+            # Handle different response formats
+            username = u.get('username') or u.get('name') or u.get('id', '')
+            user_id = u.get('id') or u.get('username') or username
+            user_options[user_id] = f"{username}"
+        
+        selected_user_id = st.selectbox(
+            "Select a user to add",
+            options=list(user_options.keys()),
+            format_func=lambda x: user_options.get(x, x),
+            key="user_select"
+        )
+        
+        if selected_user_id:
+            # Fetch full user details
+            with st.spinner("Fetching user details..."):
+                user = fetch_user_by_id(api_token, selected_user_id)
+            
             if user:
                 if 'fetched_users' not in st.session_state:
                     st.session_state['fetched_users'] = []
                 already_added = any(u.get('id') == user.get('id') for u in st.session_state['fetched_users'])
                 if not already_added:
                     st.session_state['fetched_users'].append(user)
-                st.session_state['last_fetched_user'] = user
-            else:
-                st.session_state.pop('last_fetched_user', None)
-                st.error("❌ User not found. Check the UUID and your token.")
-        else:
-            st.warning("Enter a UUID and make sure your Bearer Token is set in the sidebar.")
-
-    # Show fetched user below search
-    if 'last_fetched_user' in st.session_state:
-        u = st.session_state['last_fetched_user']
-        uid = u.get('id', '')
-        uname = u.get('name', 'Unknown')
-        already = any(usr.get('id') == uid for usr in st.session_state.get('fetched_users', []))
-
-        st.markdown(f"""
-        <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;padding:12px 16px;margin-top:6px;">
-            <div style="display:flex;align-items:center;gap:12px;">
-                <span style="font-size:28px;">👤</span>
-                <div>
-                    <div style="font-weight:700;font-size:16px;color:#15803d;">{uname}</div>
-                    <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
-                    <div style="font-size:12px;color:#16a34a;margin-top:2px;">{'✅ Added to user list' if already else ''}</div>
+                st.session_state['selected_user'] = user
+                
+                # Display selected user
+                uid = user.get('id', '')
+                uname = user.get('name') or user.get('username') or 'Unknown'
+                
+                st.markdown(f"""
+                <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;padding:12px 16px;margin-top:6px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="font-size:28px;">👤</span>
+                        <div>
+                            <div style="font-weight:700;font-size:16px;color:#15803d;">{uname}</div>
+                            <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
+                            <div style="font-size:12px;color:#16a34a;margin-top:2px;">{'✅ Already in user list' if already_added else '✅ Selected'}</div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Inline team assignment
-        _existing_teams = [t['name'] for t in load_teams().get('teams', [])]
-        if _existing_teams:
-            _assign_col1, _assign_col2 = st.columns([3, 1])
-            with _assign_col1:
-                _selected_team = st.selectbox(
-                    "Assign to team",
-                    options=_existing_teams,
-                    key=f"assign_team_{uid}"
-                )
-            with _assign_col2:
-                st.write("")  # vertical alignment nudge
-                if st.button("➕ Add to Team", key=f"btn_assign_{uid}", use_container_width=True):
-                    _td = load_teams()
-                    for _t in _td['teams']:
-                        if _t['name'] == _selected_team:
-                            if uid not in _t['members']:
-                                _t['members'].append(uid)
-                            break
-                    else:
-                        _td['teams'].append({'name': _selected_team, 'members': [uid]})
-                    from mapping import save_teams
-                    save_teams(_td)
-                    st.success(f"✅ **{uname}** added to **{_selected_team}**!")
-        else:
-            st.info("ℹ️ No teams yet — create one below to assign this user.")
-
-    # Show all fetched users
-    if st.session_state.get('fetched_users'):
-        with st.expander(f"👥 Fetched Users ({len(st.session_state['fetched_users'])})"):
-            for u in st.session_state['fetched_users']:
-                st.markdown(f"• **{u.get('name', 'Unknown')}** — `{u.get('id', '')}`")
+                """, unsafe_allow_html=True)
+                
+                # Inline team assignment
+                _existing_teams = [t['name'] for t in load_teams().get('teams', [])]
+                if _existing_teams:
+                    _assign_col1, _assign_col2 = st.columns([3, 1])
+                    with _assign_col1:
+                        _selected_team = st.selectbox(
+                            "Assign to team",
+                            options=_existing_teams,
+                            key=f"assign_team_{uid}"
+                        )
+                    with _assign_col2:
+                        st.write("")
+                        if st.button("➕ Add to Team", key=f"btn_assign_{uid}", use_container_width=True):
+                            _td = load_teams()
+                            for _t in _td['teams']:
+                                if _t['name'] == _selected_team:
+                                    if uid not in _t['members']:
+                                        _t['members'].append(uid)
+                                    break
+                            else:
+                                _td['teams'].append({'name': _selected_team, 'members': [uid]})
+                            from mapping import save_teams
+                            save_teams(_td)
+                            st.success(f"✅ **{uname}** added to **{_selected_team}**!")
+                else:
+                    st.info("ℹ️ No teams yet — create one below to assign this user.")
+        
+        # Show all fetched users
+        if st.session_state.get('fetched_users'):
+            with st.expander(f"👥 Fetched Users ({len(st.session_state['fetched_users'])})", expanded=True):
+                for u in st.session_state['fetched_users']:
+                    uname = u.get('name') or u.get('username') or 'Unknown'
+                    st.markdown(f"• **{uname}** — `{u.get('id', '')}`")
 
     # 2. Team Builder
     st.divider()
@@ -168,7 +200,7 @@ with tab_mgmt:
     </div>
 </div>""", unsafe_allow_html=True)
                 else:
-                    st.info("No members yet. Fetch a user above and use '➕ Add to Team'.")
+                    st.info("No members yet. Search for users above and use '➕ Add to Team'.")
 
                 st.divider()
 
