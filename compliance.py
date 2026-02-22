@@ -1,5 +1,5 @@
-from datetime import UTC, date, datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, date, timedelta, timezone
+from typing import List, Dict, Any
 
 STANDUP_CATEGORY_ID = "4dd053f4-6323-43d4-87a3-ce1816bd9459"
 
@@ -15,29 +15,29 @@ REQUIRED_SESSIONS = [
 
 # Time windows for sessions — IST hours (Start inclusive, End exclusive)
 SESSION_WINDOWS = {
-    "morning_standup": (9, 11),  # 09:00–10:59 IST
-    "morning_recap": (12, 13),  # 12:00–12:59 IST
+    "morning_standup":   (9, 11),   # 09:00–10:59 IST
+    "morning_recap":     (12, 13),  # 12:00–12:59 IST
     "afternoon_standup": (14, 16),  # 14:00–15:59 IST
-    "afternoon_recap": (17, 18),  # 17:00–17:59 IST
+    "afternoon_recap":   (17, 18),  # 17:00–17:59 IST
 }
 
 # Late windows — IST hours (submissions outside on-time but attributable)
 LATE_WINDOWS = {
-    "morning_standup": (11, 12),  # 11:00–11:59 IST
-    "morning_recap": (13, 14),  # 13:00–13:59 IST
+    "morning_standup":   (11, 12),  # 11:00–11:59 IST
+    "morning_recap":     (13, 14),  # 13:00–13:59 IST
     "afternoon_standup": (16, 17),  # 16:00–16:59 IST
-    "afternoon_recap": (18, 24),  # 18:00–23:59 IST
+    "afternoon_recap":   (18, 24),  # 18:00–23:59 IST
 }
 
 
 def _to_ist(dt: datetime) -> datetime:
     """Convert a datetime to IST.  Naïve datetimes are assumed UTC."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(IST)
 
 
-def _is_standup_on_date(record: dict[str, Any], target_date: date) -> bool:
+def _is_standup_on_date(record: Dict[str, Any], target_date: date) -> bool:
     """Return True if *record* is a Stand-Up contribution on *target_date* (IST)."""
     ts = record.get("timestamp")
     if not isinstance(ts, datetime):
@@ -49,8 +49,8 @@ def _is_standup_on_date(record: dict[str, Any], target_date: date) -> bool:
 
 # ── Binary helper (kept for any code that still calls it) ────────────────
 def team_has_standup_submission(
-    team_usernames: list[str],
-    records_by_user: dict[str, list[dict[str, Any]]],
+    team_usernames: List[str],
+    records_by_user: Dict[str, List[Dict[str, Any]]],
     target_date: date,
 ) -> bool:
     """Return True if ANY member has at least one Stand-Up contribution on
@@ -64,10 +64,10 @@ def team_has_standup_submission(
 
 # ── Per-slot compliance (the primary function used by the dashboard) ─────
 def get_team_slot_compliance(
-    team_usernames: list[str],
-    records_by_user: dict[str, list[dict[str, Any]]],
+    team_usernames: List[str],
+    records_by_user: Dict[str, List[Dict[str, Any]]],
     target_date: date,
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """
     Pure function — checks each session slot independently.
 
@@ -87,7 +87,7 @@ def get_team_slot_compliance(
 
     No I/O, no API calls, no Streamlit dependency.
     """
-    slots: dict[str, str] = {s: "missing" for s in REQUIRED_SESSIONS}
+    slots: Dict[str, str] = {s: "missing" for s in REQUIRED_SESSIONS}
 
     for username in team_usernames:
         for record in records_by_user.get(username, []):

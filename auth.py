@@ -1,12 +1,11 @@
 """
-auth.py – Corpus authentication helpers.
+auth.py – Corpus login helper.
 
-Provides ``login()`` for phone+password auth against the Corpus API,
-and ``fetch_current_user()`` for retrieving the logged-in user's profile.
+Reads CORPUS_PHONE and CORPUS_PASSWORD from .env and auto-authenticates
+against the Corpus API at startup.  No interactive login required.
 """
 
 import os
-
 import requests
 from dotenv import load_dotenv
 
@@ -22,7 +21,7 @@ def login(phone: str, password: str) -> dict:
     Returns
     -------
     dict
-        On success: ``{"success": True, "token": "<access_token>", "user": {...}}``
+        On success: ``{"success": True, "token": "<access_token>"}``
         On failure: ``{"success": False, "message": "..."}``
     """
     try:
@@ -42,10 +41,7 @@ def login(phone: str, password: str) -> dict:
             )
             if token:
                 return {"success": True, "token": token}
-            return {
-                "success": False,
-                "message": "Login succeeded but no token found in response.",
-            }
+            return {"success": False, "message": "Login succeeded but no token found in response."}
 
         msg = data.get("message") or data.get("detail") or resp.text[:200]
         return {"success": False, "message": msg}
@@ -58,20 +54,23 @@ def login(phone: str, password: str) -> dict:
         return {"success": False, "message": f"Unexpected error: {exc}"}
 
 
-def fetch_current_user(token: str) -> dict:
+def get_token() -> str:
     """
-    Fetch the currently authenticated user's profile via ``/auth/me``.
+    Auto-login using credentials from .env and return a fresh Bearer token.
 
-    Returns the user dict on success, or an empty dict on failure.
+    Reads ``CORPUS_PHONE`` and ``CORPUS_PASSWORD`` environment variables,
+    calls the login endpoint, and returns the access token string.
+    Raises ``RuntimeError`` if credentials are missing or login fails.
     """
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/auth/me",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
+    phone = os.getenv("CORPUS_PHONE", "")
+    password = os.getenv("CORPUS_PASSWORD", "")
+
+    if not phone or not password:
+        raise RuntimeError(
+            "CORPUS_PHONE and CORPUS_PASSWORD must be set in .env"
         )
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception:
-        pass
-    return {}
+
+    result = login(phone, password)
+    if result["success"]:
+        return result["token"]
+    raise RuntimeError(f"Auto-login failed: {result['message']}")

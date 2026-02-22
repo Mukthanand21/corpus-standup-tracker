@@ -1,22 +1,21 @@
 import json
 import os
+from typing import Dict, List
 
 TEAMS_FILE = "teams.json"
 
-
-def load_teams() -> dict[str, list[dict]]:
+def load_teams() -> Dict[str, List[Dict]]:
     """Loads teams from teams.json."""
     if not os.path.exists(TEAMS_FILE):
         return {"teams": []}
     try:
-        with open(TEAMS_FILE) as f:
+        with open(TEAMS_FILE, "r") as f:
             return json.load(f)
     except Exception as e:
         print(f"Error loading teams: {e}")
         return {"teams": []}
 
-
-def save_teams(teams_data: dict[str, list[dict]]):
+def save_teams(teams_data: Dict[str, List[Dict]]):
     """Saves teams to teams.json."""
     try:
         with open(TEAMS_FILE, "w") as f:
@@ -24,8 +23,7 @@ def save_teams(teams_data: dict[str, list[dict]]):
     except Exception as e:
         print(f"Error saving teams: {e}")
 
-
-def get_team_map() -> dict[str, str]:
+def get_team_map() -> Dict[str, str]:
     """Returns a flat mapping of username -> team_name."""
     data = load_teams()
     mapping = {}
@@ -35,20 +33,17 @@ def get_team_map() -> dict[str, str]:
             mapping[username] = name
     return mapping
 
-
 def get_team(username: str) -> str:
     """Returns the team name for a given username."""
     mapping = get_team_map()
     return mapping.get(username, "Unassigned")
 
-
-def get_all_teams() -> list[str]:
+def get_all_teams() -> List[str]:
     """Returns a list of all unique team names."""
     data = load_teams()
     return [t.get("name") for t in data.get("teams", [])]
 
-
-def update_team_membership(team_name: str, usernames: list[str]):
+def update_team_membership(team_name: str, usernames: List[str]):
     """Updates members (usernames) of a team."""
     data = load_teams()
     found = False
@@ -60,7 +55,6 @@ def update_team_membership(team_name: str, usernames: list[str]):
     if not found:
         data["teams"].append({"name": team_name, "members": usernames})
     save_teams(data)
-
 
 def delete_team(team_name: str):
     """Deletes a team."""
