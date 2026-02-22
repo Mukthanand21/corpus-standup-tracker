@@ -1,0 +1,16 @@
+{
+    "teams": [
+        {
+            "name": "Team 1",
+            "members": [
+                "0e852321-3a2c-4222-aaed-68640a8c8da2"
+            ]
+        },
+        {
+            "name": "Team 2",
+            "members": [
+                "26df948f-f50f-4888-874b-d688e96c83b3"
+            ]
+        }
+    ]
+}

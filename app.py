@@ -1,4 +1,3 @@
-import os
 import streamlit as st
 import pandas as pd
 from datetime import date
@@ -6,6 +5,7 @@ from dotenv import load_dotenv
 from fetch import fetch_user_by_id, fetch_user_audio_contributions, search_users
 from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
+from auth import get_token
 
 load_dotenv()  # Load .env at app startup
 
@@ -24,16 +24,42 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ───────────────────────────────────────────────────────────
+# AUTO-LOGIN: fetch a fresh token from .env credentials
+# ───────────────────────────────────────────────────────────
+if "api_token" not in st.session_state:
+    try:
+        st.session_state["api_token"] = get_token()
+    except RuntimeError as e:
+        st.error(f"🔐 Auto-login failed: {e}")
+        st.info("Set CORPUS_PHONE and CORPUS_PASSWORD in your .env file.")
+        st.stop()
+
+api_token: str = st.session_state["api_token"]
+
 st.title("🚀 Team Standup Compliance Tracker")
 st.caption("Viswam.Ai - Swecha Corpus Backend Powered")
 
 # Sidebar
 with st.sidebar:
-    st.header("🔑 Auth")
-    _default_token = os.getenv("CORPUS_ACCESS_TOKEN", "") or os.getenv("API_TOKEN", "")
-    api_token = st.text_input("Bearer Token", value=_default_token, type="password")
-    st.divider()
-    st.info("Assign members locally in the 'Team Management' tab.")
+    st.markdown("### 🕐 Standup Time Slots")
+    st.markdown("""
+| Session | On-Time | Late |
+|:--------|:--------|:-----|
+| 🌅 Morning Standup | 09:00 – 10:59 | 11:00 – 11:59 |
+| 🔄 Morning Recap | 12:00 – 12:59 | 13:00 – 13:59 |
+| ☀️ Afternoon Standup | 14:00 – 15:59 | 16:00 – 16:59 |
+| 🔄 Afternoon Recap | 17:00 – 17:59 | 18:00 – 23:59 |
+""")
+    st.markdown("---")
+    st.markdown("""
+**Status Legend**
+- ✅ **Submitted** — On time
+- ⚠️ **Late** — Within late window
+- ❌ **Missing** — No submission
+""")
+    st.markdown("---")
+    st.caption("All times are in IST (UTC+5:30)")
 
 tab_dashboard, tab_mgmt = st.tabs(["📊 Compliance Dashboard", "👥 Team Management"])
 
