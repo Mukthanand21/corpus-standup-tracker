@@ -195,6 +195,68 @@ h1,h2,h3 { font-family: 'Syne', sans-serif !important; color: var(--text) !impor
 .stInfo { background: rgba(59,130,246,0.1) !important; border-color: var(--blue) !important; color: var(--blue2) !important; }
 .stError { background: rgba(239,68,68,0.12) !important; border-color: var(--red) !important; color: var(--red2) !important; }
 hr { border-color: var(--border2) !important; }
+
+/* ── streamlit-searchbox dark theme ── */
+div[data-testid="stForm"],
+.searchbox-container,
+[data-baseweb="input"],
+[data-baseweb="base-input"] {
+  background: var(--surface2) !important;
+  border-color: var(--border2) !important;
+  color: var(--text) !important;
+}
+/* The searchbox input wrapper */
+div[data-baseweb="input"] {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 10px !important;
+}
+div[data-baseweb="input"]:focus-within {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15) !important;
+}
+/* The actual input inside searchbox */
+div[data-baseweb="input"] input {
+  background: transparent !important;
+  color: var(--text) !important;
+  font-family: 'Nunito', sans-serif !important;
+  font-size: 14px !important;
+  caret-color: var(--blue) !important;
+}
+div[data-baseweb="input"] input::placeholder {
+  color: var(--text3) !important;
+}
+/* Dropdown list */
+ul[data-baseweb="menu"],
+div[data-baseweb="menu"] {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+}
+li[data-baseweb="menu-item"],
+button[data-baseweb="menu-item"] {
+  background: var(--surface2) !important;
+  color: var(--text) !important;
+  font-family: 'Nunito', sans-serif !important;
+  font-size: 13px !important;
+}
+li[data-baseweb="menu-item"]:hover,
+button[data-baseweb="menu-item"]:hover {
+  background: var(--surface3) !important;
+  color: var(--blue2) !important;
+}
+/* Clear / search icon inside searchbox */
+div[data-baseweb="input"] svg {
+  fill: var(--text3) !important;
+}
+/* Tag/chip for selected value */
+[data-baseweb="tag"] {
+  background: rgba(59,130,246,0.15) !important;
+  border-color: rgba(59,130,246,0.3) !important;
+  color: var(--blue2) !important;
+  border-radius: 6px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -235,13 +297,6 @@ st.markdown("""
         letter-spacing:-0.5px;
         line-height:1;
       ">Standup Compliance Tracker</div>
-      <div style="font-size:13px;color:#4d6fa0;margin-top:6px;font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;">
-        ◈ VISWAM.AI &nbsp;·&nbsp; SWECHA CORPUS BACKEND &nbsp;·&nbsp; IST TIMEZONE
-      </div>
-    </div>
-    <div style="margin-left:auto;display:flex;gap:12px;">
-      <div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:6px 14px;font-size:12px;color:#34d399;font-family:'JetBrains Mono',monospace;">● LIVE</div>
-      <div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);border-radius:8px;padding:6px 14px;font-size:12px;color:#60a5fa;font-family:'JetBrains Mono',monospace;">IST UTC+5:30</div>
     </div>
   </div>
 </div>
