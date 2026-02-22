@@ -24,36 +24,36 @@ def save_teams(teams_data: Dict[str, List[Dict]]):
         print(f"Error saving teams: {e}")
 
 def get_team_map() -> Dict[str, str]:
-    """Returns a flat mapping of member_id to team_name."""
+    """Returns a flat mapping of username -> team_name."""
     data = load_teams()
     mapping = {}
     for team in data.get("teams", []):
         name = team.get("name")
-        for member_id in team.get("members", []):
-            mapping[member_id] = name
+        for username in team.get("members", []):
+            mapping[username] = name
     return mapping
 
-def get_team(member_id: str) -> str:
-    """Returns the team name for a given member_id."""
+def get_team(username: str) -> str:
+    """Returns the team name for a given username."""
     mapping = get_team_map()
-    return mapping.get(member_id, "Unassigned")
+    return mapping.get(username, "Unassigned")
 
 def get_all_teams() -> List[str]:
     """Returns a list of all unique team names."""
     data = load_teams()
     return [t.get("name") for t in data.get("teams", [])]
 
-def update_team_membership(team_name: str, member_ids: List[str]):
-    """Updates members of a team."""
+def update_team_membership(team_name: str, usernames: List[str]):
+    """Updates members (usernames) of a team."""
     data = load_teams()
     found = False
     for team in data["teams"]:
         if team["name"] == team_name:
-            team["members"] = list(set(member_ids))
+            team["members"] = list(set(usernames))
             found = True
             break
     if not found:
-        data["teams"].append({"name": team_name, "members": member_ids})
+        data["teams"].append({"name": team_name, "members": usernames})
     save_teams(data)
 
 def delete_team(team_name: str):

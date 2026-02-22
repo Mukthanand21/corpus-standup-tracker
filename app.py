@@ -3,8 +3,8 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from dotenv import load_dotenv
-from fetch import fetch_records, fetch_users, fetch_categories, fetch_user_by_id, fetch_team_audio_records
-from compliance import calculate_compliance
+from fetch import fetch_categories, fetch_user_by_id, fetch_user_audio_contributions
+from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
 
 load_dotenv()  # Load .env at app startup
@@ -30,7 +30,7 @@ st.caption("Viswam.Ai - Swecha Corpus Backend Powered")
 # Sidebar
 with st.sidebar:
     st.header("🔑 Auth")
-    _default_token = os.getenv("API_TOKEN", "")
+    _default_token = os.getenv("CORPUS_ACCESS_TOKEN", "") or os.getenv("API_TOKEN", "")
     api_token = st.text_input("Bearer Token", value=_default_token, type="password")
     st.divider()
     st.info("Assign members locally in the 'Team Management' tab.")
@@ -211,27 +211,40 @@ with tab_dashboard:
     if run:
         if not api_token: st.warning("Please enter a Bearer Token.")
         else:
-            # Collect all unique member IDs across all teams
+            # Collect all unique usernames across all teams
             teams_data = load_teams()
-            all_member_ids = list({
-                member_id
+            all_usernames = list({
+                username
                 for team in teams_data.get("teams", [])
-                for member_id in team.get("members", [])
+                for username in team.get("members", [])
             })
 
-            if not all_member_ids:
+            if not all_usernames:
                 st.warning("⚠️ No team members found. Add members in the 'Team Management' tab first.")
             else:
-                date_str = selected_date.isoformat()
-                with st.spinner(f"🎙️ Fetching audio contributions for {len(all_member_ids)} member(s) (cached 5 min)..."):
-                    records = fetch_team_audio_records(api_token, all_member_ids)
-                    # Filter to selected date
-                    records = [r for r in records if r.get("created_at", "").startswith(date_str)]
+                with st.spinner(f"🎙️ Fetching audio contributions for {len(all_usernames)} member(s) (cached 5 min)..."):
+                    records_by_user = {}
+                    for uname in all_usernames:
+                        records_by_user[uname] = fetch_user_audio_contributions(api_token, uname)
 
-                if not records:
-                    st.warning("⚠️ No audio records found for the selected date. Members may not have uploaded yet.")
+                # Build compliance results per team
+                results = []
+                for team in teams_data.get("teams", []):
+                    team_name = team["name"]
+                    team_usernames = team.get("members", [])
+                    slots = get_team_slot_compliance(
+                        team_usernames, records_by_user, selected_date,
+                    )
+                    completed = sum(1 for v in slots.values() if v == "submitted")
+                    results.append({
+                        "team_name": team_name,
+                        **slots,
+                        "completion": (completed / len(REQUIRED_SESSIONS)) * 100,
+                    })
+
+                if not results:
+                    st.warning("⚠️ No teams configured. Add members in the 'Team Management' tab first.")
                 else:
-                    results = calculate_compliance(records, date_str, all_created_teams)
                     df_raw = pd.DataFrame(results)
                     
                     # Selection Filter (on raw data)
