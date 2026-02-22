@@ -704,6 +704,166 @@ with tab_analytics:
                     )
                     st.plotly_chart(fig_t, use_container_width=True, config={"displayModeBar":False})
 
+                # ── Per-person upload heatmap (date × member, color = upload count) ──
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("""<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+                  color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">
+                  ◈ Member Activity Heatmap</div>
+                  <div style="font-size:12px;color:#556080;font-family:'JetBrains Mono',monospace;
+                  margin-bottom:14px;">audio uploads per person · per day · grouped by team</div>
+                """, unsafe_allow_html=True)
+
+                # Team selector for heatmap
+                unique_teams = sorted(df_all["team"].unique().tolist())
+                hm_team = st.selectbox(
+                    "Select team to view heatmap",
+                    options=["All Teams"] + unique_teams,
+                    key="hm_team_sel",
+                    label_visibility="collapsed",
+                )
+
+                if hm_team == "All Teams":
+                    hm_df = df_all.copy()
+                else:
+                    hm_df = df_all[df_all["team"] == hm_team].copy()
+
+                if hm_df.empty:
+                    st.info("No data for this team in the selected period.")
+                else:
+                    # Resolve member display names
+                    uid_to_name = {}
+                    for uid in hm_df["user"].unique():
+                        ud = fetch_user_by_id(api_token, uid) if api_token else {}
+                        name = ud.get("name") or ud.get("full_name") or ud.get("username") or uid
+                        uid_to_name[uid] = name
+
+                    hm_df["member"] = hm_df["user"].map(uid_to_name)
+
+                    # Build pivot: rows = members, cols = dates, values = upload count
+                    hm_pivot = (
+                        hm_df.groupby(["member", "date"])
+                        .size()
+                        .reset_index(name="uploads")
+                    )
+                    all_dates  = sorted(hm_df["date"].unique())
+                    all_members_hm = sorted(hm_df["member"].unique())
+
+                    # Full grid (fill missing with 0)
+                    full_idx = pd.MultiIndex.from_product(
+                        [all_members_hm, all_dates], names=["member", "date"]
+                    )
+                    hm_full = (
+                        hm_pivot.set_index(["member", "date"])
+                        .reindex(full_idx, fill_value=0)
+                        .reset_index()
+                    )
+                    matrix = hm_full.pivot(index="member", columns="date", values="uploads")
+
+                    # Custom hover text
+                    hover_text = []
+                    for mem in matrix.index:
+                        row_hover = []
+                        for d in matrix.columns:
+                            cnt = int(matrix.loc[mem, d])
+                            status_breakdown = hm_df[
+                                (hm_df["member"] == mem) & (hm_df["date"] == d)
+                            ]["status"].value_counts().to_dict()
+                            s = status_breakdown.get("submitted", 0)
+                            l = status_breakdown.get("late", 0)
+                            o = status_breakdown.get("other", 0)
+                            row_hover.append(
+                                f"<b>{mem}</b><br>"
+                                f"📅 {d}<br>"
+                                f"🎙️ Total: {cnt}<br>"
+                                f"✅ On-time: {s}  ⚡ Late: {l}  🕐 Other: {o}"
+                            )
+                        hover_text.append(row_hover)
+
+                    # Date labels — show as strings
+                    date_labels = [str(d) for d in matrix.columns]
+
+                    # Dynamic height based on member count
+                    cell_h = max(36, min(56, 400 // max(len(all_members_hm), 1)))
+                    fig_hm_h = max(300, len(all_members_hm) * cell_h + 120)
+
+                    fig_hm = go.Figure(go.Heatmap(
+                        z=matrix.values.tolist(),
+                        x=date_labels,
+                        y=matrix.index.tolist(),
+                        text=hover_text,
+                        hovertemplate="%{text}<extra></extra>",
+                        colorscale=[
+                            [0.0,  "rgba(13,22,41,1)"],
+                            [0.01, "rgba(21,36,70,1)"],
+                            [0.25, "rgba(29,78,216,0.6)"],
+                            [0.5,  "rgba(16,185,129,0.75)"],
+                            [0.75, "rgba(245,158,11,0.85)"],
+                            [1.0,  "rgba(239,68,68,1)"],
+                        ],
+                        showscale=True,
+                        colorbar=dict(
+                            title=dict(text="Uploads", font=dict(size=11, color="#8899bb", family="JetBrains Mono")),
+                            tickfont=dict(size=10, color="#8899bb", family="JetBrains Mono"),
+                            bgcolor="rgba(0,0,0,0)",
+                            outlinecolor="rgba(255,255,255,0.08)",
+                            outlinewidth=1,
+                            thickness=12,
+                            len=0.8,
+                        ),
+                        xgap=3,
+                        ygap=3,
+                    ))
+
+                    fig_hm.update_layout(
+                        height=fig_hm_h,
+                        plot_bgcolor="rgba(7,13,26,1)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="JetBrains Mono", size=11, color="#8899bb"),
+                        margin=dict(l=0, r=60, t=20, b=60),
+                        xaxis=dict(
+                            showgrid=False,
+                            tickangle=-45,
+                            tickfont=dict(size=10, color="#556080"),
+                            linecolor="rgba(255,255,255,0.05)",
+                            title=dict(text="Date", font=dict(size=11, color="#4d6fa0")),
+                        ),
+                        yaxis=dict(
+                            showgrid=False,
+                            tickfont=dict(size=11, color="#8899bb"),
+                            autorange="reversed",
+                            title=dict(text="Member", font=dict(size=11, color="#4d6fa0")),
+                        ),
+                    )
+
+                    st.plotly_chart(fig_hm, use_container_width=True, config={"displayModeBar": False})
+
+                    # Legend strip below heatmap
+                    st.markdown("""
+                    <div style="display:flex;gap:20px;align-items:center;margin-top:-8px;flex-wrap:wrap;">
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#556080;">Color scale:</div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="width:14px;height:14px;border-radius:3px;background:rgba(13,22,41,1);border:1px solid rgba(255,255,255,0.1);"></div>
+                        <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">0 uploads</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="width:14px;height:14px;border-radius:3px;background:rgba(29,78,216,0.7);"></div>
+                        <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">low</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="width:14px;height:14px;border-radius:3px;background:rgba(16,185,129,0.8);"></div>
+                        <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">medium</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="width:14px;height:14px;border-radius:3px;background:rgba(245,158,11,0.9);"></div>
+                        <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">high</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="width:14px;height:14px;border-radius:3px;background:rgba(239,68,68,1);"></div>
+                        <span style="font-size:11px;color:#556080;font-family:'JetBrains Mono',monospace;">very high</span>
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  TEAM MANAGEMENT
