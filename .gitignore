@@ -11,6 +11,13 @@ venv/
 .venv/
 env/
 
+# Python lock file (generated locally, causes merge conflicts)
+uv.lock
+
+# Cache directories
+.pytest_cache/
+.ruff_cache/
+
 # OS files
 .DS_Store
 Thumbs.db
