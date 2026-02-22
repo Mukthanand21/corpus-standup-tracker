@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from dotenv import load_dotenv
-from fetch import fetch_categories, fetch_user_by_id, fetch_user_audio_contributions
+from fetch import fetch_user_by_id, fetch_user_audio_contributions
 from compliance import get_team_slot_compliance, REQUIRED_SESSIONS
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
 
@@ -41,22 +41,9 @@ tab_dashboard, tab_mgmt = st.tabs(["📊 Compliance Dashboard", "👥 Team Manag
 with tab_mgmt:
     st.header("Team & Member Setup")
     
-    # API Settings in Expander
-    with st.expander("⚙️ API Configuration", expanded=False):
-        _default_standup_id = os.getenv("STANDUP_CATEGORY_ID", "")
-        _default_internship_id = os.getenv("INTERNSHIP_CATEGORY_ID", "")
-        _default_fetch_limit = int(os.getenv("FETCH_LIMIT", "500"))
-        st.text_input("Standup Category ID", value=_default_standup_id, key="standup_cat_id")
-        st.text_input("Internship Category ID", value=_default_internship_id, key="internship_cat_id")
-        st.number_input("Fetch Limit", min_value=10, max_value=2000, value=_default_fetch_limit, key="fetch_limit")
-        if st.button("🔍 Find Category IDs"):
-            if api_token:
-                cats = fetch_categories(api_token)
-                st.dataframe(cats)
-
     # 1. Fetch User by ID
     st.subheader("👤 User Management")
-    u_id_search = st.text_input("Search User by UUID", placeholder="e.g. 8d53a79b-ae48-48db-bd28-1aa8557357a3")
+    u_id_search = st.text_input("Search User", placeholder="Enter username to fetch details")
     if st.button("🔍 Fetch"):
         if api_token and u_id_search:
             with st.spinner("Looking up user..."):
