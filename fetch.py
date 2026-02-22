@@ -83,3 +83,40 @@ def fetch_categories(token: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error fetching categories: {e}")
         return []
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_user_audio_contributions(token: str, user_identifier: str) -> List[Dict[str, Any]]:
+    """
+    Fetches audio contributions for a specific user.
+    Endpoint: GET /api/v1/users/{user_identifier}/contributions/audio
+    Cached for 5 minutes.
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.get(
+            f"{BASE_URL}/users/{user_identifier}/contributions/audio",
+            headers=headers,
+            timeout=15
+        )
+        response.raise_for_status()
+        data = response.json()
+        # Ensure each record carries the user_id so compliance engine can map it
+        records = data if isinstance(data, list) else data.get("items", data.get("data", data.get("results", [])))
+        for record in records:
+            if "user_id" not in record:
+                record["user_id"] = user_identifier
+        return records
+    except Exception as e:
+        print(f"Error fetching audio contributions for user {user_identifier}: {e}")
+        return []
+
+def fetch_team_audio_records(token: str, member_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Aggregates audio contributions for all given member IDs into one flat list.
+    Uses fetch_user_audio_contributions() per user (each call is independently cached).
+    """
+    all_records: List[Dict[str, Any]] = []
+    for uid in member_ids:
+        records = fetch_user_audio_contributions(token, uid)
+        all_records.extend(records)
+    return all_records
