@@ -1,100 +1,111 @@
-from datetime import datetime
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Dict, Any
-from mapping import get_team
+
+STANDUP_CATEGORY_ID = "4dd053f4-6323-43d4-87a3-ce1816bd9459"
+
+# IST is UTC+5:30
+IST = timezone(timedelta(hours=5, minutes=30))
 
 REQUIRED_SESSIONS = [
     "morning_standup",
     "morning_recap",
     "afternoon_standup",
-    "afternoon_recap"
+    "afternoon_recap",
 ]
 
-# Time windows for sessions (Start Hour inclusive, End Hour exclusive)
+# Time windows for sessions — IST hours (Start inclusive, End exclusive)
 SESSION_WINDOWS = {
-    "morning_standup": (9, 11),
-    "morning_recap": (12, 13),
-    "afternoon_standup": (14, 16),
-    "afternoon_recap": (17, 18),
+    "morning_standup":   (9, 11),   # 09:00–10:59 IST
+    "morning_recap":     (12, 13),  # 12:00–12:59 IST
+    "afternoon_standup": (14, 16),  # 14:00–15:59 IST
+    "afternoon_recap":   (17, 18),  # 17:00–17:59 IST
 }
 
-def classify_session(timestamp_str: str) -> str:
+# Late windows — IST hours (submissions outside on-time but attributable)
+LATE_WINDOWS = {
+    "morning_standup":   (11, 12),  # 11:00–11:59 IST
+    "morning_recap":     (13, 14),  # 13:00–13:59 IST
+    "afternoon_standup": (16, 17),  # 16:00–16:59 IST
+    "afternoon_recap":   (18, 24),  # 18:00–23:59 IST
+}
+
+
+def _to_ist(dt: datetime) -> datetime:
+    """Convert a datetime to IST.  Naïve datetimes are assumed UTC."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST)
+
+
+def _is_standup_on_date(record: Dict[str, Any], target_date: date) -> bool:
+    """Return True if *record* is a Stand-Up contribution on *target_date* (IST)."""
+    ts = record.get("timestamp")
+    if not isinstance(ts, datetime):
+        return False
+    if STANDUP_CATEGORY_ID not in record.get("category_ids", []):
+        return False
+    return _to_ist(ts).date() == target_date
+
+
+# ── Binary helper (kept for any code that still calls it) ────────────────
+def team_has_standup_submission(
+    team_usernames: List[str],
+    records_by_user: Dict[str, List[Dict[str, Any]]],
+    target_date: date,
+) -> bool:
+    """Return True if ANY member has at least one Stand-Up contribution on
+    *target_date*.  Short-circuits on first match.  Pure function."""
+    for username in team_usernames:
+        for record in records_by_user.get(username, []):
+            if _is_standup_on_date(record, target_date):
+                return True
+    return False
+
+
+# ── Per-slot compliance (the primary function used by the dashboard) ─────
+def get_team_slot_compliance(
+    team_usernames: List[str],
+    records_by_user: Dict[str, List[Dict[str, Any]]],
+    target_date: date,
+) -> Dict[str, str]:
     """
-    Classifies a submission into a session or marks it as 'late' based on the timestamp.
+    Pure function — checks each session slot independently.
+
+    For every team member's contributions on *target_date*:
+      • If the IST hour falls inside a slot's on-time window → "submitted"
+      • Else if it falls inside the late window → "late" (only if not already submitted)
+      • Otherwise slot stays "missing"
+
+    Returns dict like::
+
+        {
+            "morning_standup":   "submitted" | "late" | "missing",
+            "morning_recap":     ...,
+            "afternoon_standup": ...,
+            "afternoon_recap":   ...,
+        }
+
+    No I/O, no API calls, no Streamlit dependency.
     """
-    try:
-        dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        hour = dt.hour
+    slots: Dict[str, str] = {s: "missing" for s in REQUIRED_SESSIONS}
 
-        for session, (start, end) in SESSION_WINDOWS.items():
-            if start <= hour < end:
-                return session
-        
-        return "late"
-    except Exception:
-        return "invalid"
+    for username in team_usernames:
+        for record in records_by_user.get(username, []):
+            if not _is_standup_on_date(record, target_date):
+                continue
 
-def calculate_compliance(records: List[Dict[str, Any]], target_date: str, all_teams: List[str]) -> List[Dict[str, Any]]:
-    """
-    Calculates standup compliance for each team based on records and a target date.
-    
-    Args:
-        records (List[Dict[str, Any]]): Raw record data from Swecha API.
-        target_date (str): The date to filter for (YYYY-MM-DD).
-        all_teams (List[str]): List of all team names from teams.json.
-        
-    Returns:
-        List[Dict[str, Any]]: Structured status for each team.
-    """
-    # Initialize all created teams with "missing"
-    team_data = {team: {s: "missing" for s in REQUIRED_SESSIONS} for team in all_teams}
+            ist_hour = _to_ist(record["timestamp"]).hour
 
-    # Process records
-    for record in records:
-        # Swecha schema: user_id and created_at
-        user_id = record.get("user_id")
-        created_at = record.get("created_at")
-        
-        if not user_id or not created_at:
-            continue
+            # Check on-time windows first
+            for session, (start, end) in SESSION_WINDOWS.items():
+                if start <= ist_hour < end:
+                    slots[session] = "submitted"
+                    break
+            else:
+                # Not in any on-time window → check late windows
+                for session, (start, end) in LATE_WINDOWS.items():
+                    if start <= ist_hour < end and slots[session] == "missing":
+                        slots[session] = "late"
+                        break
 
-        # Filter for target date
-        if not created_at.startswith(target_date):
-            continue
-
-        team = get_team(user_id)
-        
-        # If team is not in created list, but has active uploads, add it to data
-        if team not in team_data:
-            team_data[team] = {s: "missing" for s in REQUIRED_SESSIONS}
-
-        session = classify_session(created_at)
-
-        if session in REQUIRED_SESSIONS:
-            team_data[team][session] = "submitted"
-        elif session == "late":
-            # Heuristic for late classification
-            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            hour = dt.hour
-            
-            late_session = None
-            if 11 <= hour < 12: late_session = "morning_standup"
-            elif 13 <= hour < 14: late_session = "morning_recap"
-            elif 16 <= hour < 17: late_session = "afternoon_standup"
-            elif 18 <= hour <= 23: late_session = "afternoon_recap"
-            
-            if late_session and team_data[team][late_session] == "missing":
-                team_data[team][late_session] = "late"
-
-    # Format results
-    results = []
-    for team, sessions in team_data.items():
-        completed = sum(1 for s in sessions.values() if s == "submitted")
-        completion = (completed / len(REQUIRED_SESSIONS)) * 100
-
-        results.append({
-            "team_name": team,
-            **sessions,
-            "completion": completion
-        })
-
-    return results
+    return slots
