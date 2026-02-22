@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from dotenv import load_dotenv
-from fetch import fetch_records, fetch_users, fetch_categories, fetch_user_by_id
+from fetch import fetch_records, fetch_users, fetch_categories, fetch_user_by_id, fetch_team_audio_records
 from compliance import calculate_compliance
 from mapping import load_teams, save_teams, update_team_membership, delete_team, get_all_teams
 
@@ -78,17 +78,48 @@ with tab_mgmt:
     if 'last_fetched_user' in st.session_state:
         u = st.session_state['last_fetched_user']
         uid = u.get('id', '')
+        uname = u.get('name', 'Unknown')
         already = any(usr.get('id') == uid for usr in st.session_state.get('fetched_users', []))
+
         st.markdown(f"""
-        <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;padding:12px 16px;margin-top:6px;display:flex;align-items:center;gap:12px;">
-            <span style="font-size:28px;">👤</span>
-            <div>
-                <div style="font-weight:700;font-size:16px;color:#15803d;">{u.get('name', 'Unknown')}</div>
-                <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
-                <div style="font-size:12px;color:#16a34a;margin-top:2px;">{'✅ Added to user list' if already else ''}</div>
+        <div style="border:1px solid #22c55e;background:#f0fdf4;border-radius:8px;padding:12px 16px;margin-top:6px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span style="font-size:28px;">👤</span>
+                <div>
+                    <div style="font-weight:700;font-size:16px;color:#15803d;">{uname}</div>
+                    <div style="font-size:12px;color:#6b7280;">ID: {uid}</div>
+                    <div style="font-size:12px;color:#16a34a;margin-top:2px;">{'✅ Added to user list' if already else ''}</div>
+                </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Inline team assignment
+        _existing_teams = [t['name'] for t in load_teams().get('teams', [])]
+        if _existing_teams:
+            _assign_col1, _assign_col2 = st.columns([3, 1])
+            with _assign_col1:
+                _selected_team = st.selectbox(
+                    "Assign to team",
+                    options=_existing_teams,
+                    key=f"assign_team_{uid}"
+                )
+            with _assign_col2:
+                st.write("")  # vertical alignment nudge
+                if st.button("➕ Add to Team", key=f"btn_assign_{uid}", use_container_width=True):
+                    _td = load_teams()
+                    for _t in _td['teams']:
+                        if _t['name'] == _selected_team:
+                            if uid not in _t['members']:
+                                _t['members'].append(uid)
+                            break
+                    else:
+                        _td['teams'].append({'name': _selected_team, 'members': [uid]})
+                    from mapping import save_teams
+                    save_teams(_td)
+                    st.success(f"✅ **{uname}** added to **{_selected_team}**!")
+        else:
+            st.info("ℹ️ No teams yet — create one below to assign this user.")
 
     # Show all fetched users
     if st.session_state.get('fetched_users'):
@@ -146,21 +177,27 @@ with tab_dashboard:
     if run:
         if not api_token: st.warning("Please enter a Bearer Token.")
         else:
-            s_id = st.session_state.get('standup_cat_id', "")
-            i_id = st.session_state.get('internship_cat_id', "")
-            limit = st.session_state.get('fetch_limit', 500)
-            
-            with st.spinner("⏳ Fetching records (cached for 5 min)..."):
-                records = []
+            # Collect all unique member IDs across all teams
+            teams_data = load_teams()
+            all_member_ids = list({
+                member_id
+                for team in teams_data.get("teams", [])
+                for member_id in team.get("members", [])
+            })
+
+            if not all_member_ids:
+                st.warning("⚠️ No team members found. Add members in the 'Team Management' tab first.")
+            else:
                 date_str = selected_date.isoformat()
-                if s_id: records.extend(fetch_records(api_token, target_date=date_str, category_id=s_id, limit=limit))
-                if i_id: records.extend(fetch_records(api_token, target_date=date_str, category_id=i_id, limit=limit))
-                if not records and not (s_id or i_id): records = fetch_records(api_token, target_date=date_str, limit=limit)
-                
+                with st.spinner(f"🎙️ Fetching audio contributions for {len(all_member_ids)} member(s) (cached 5 min)..."):
+                    records = fetch_team_audio_records(api_token, all_member_ids)
+                    # Filter to selected date
+                    records = [r for r in records if r.get("created_at", "").startswith(date_str)]
+
                 if not records:
-                    st.warning("⚠️ No records found. Check your token and Category IDs in the Team Management tab.")
+                    st.warning("⚠️ No audio records found for the selected date. Members may not have uploaded yet.")
                 else:
-                    results = calculate_compliance(records, selected_date.isoformat(), all_created_teams)
+                    results = calculate_compliance(records, date_str, all_created_teams)
                     df_raw = pd.DataFrame(results)
                     
                     # Selection Filter (on raw data)
