@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 
-load_dotenv()  # Load variables from .env into os.environ
+load_dotenv()
 
 BASE_URL = os.getenv("BASE_URL", "https://api.corpus.swecha.org/api/v1")
 
@@ -16,6 +16,7 @@ def _parse_timestamp(ts_str: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_user_by_id(token: str, user_id: str) -> Dict[str, Any]:
@@ -38,7 +39,6 @@ def search_users(token: str, query: str, limit: int = 10) -> List[Dict[str, Any]
     """
     Search users by similarity with username.
     Endpoint: GET /api/v1/users/search?query={query}&limit={limit}
-    
     Returns a list of users matching the query.
     Cached for 10 minutes.
     """
@@ -51,6 +51,7 @@ def search_users(token: str, query: str, limit: int = 10) -> List[Dict[str, Any]
     except Exception as e:
         print(f"Error searching users with query '{query}': {e}")
         return []
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_categories(token: str) -> List[Dict[str, Any]]:
@@ -66,16 +67,15 @@ def fetch_categories(token: str) -> List[Dict[str, Any]]:
         print(f"Error fetching categories: {e}")
         return []
 
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_user_audio_contributions(token: str, username: str) -> List[Dict[str, Any]]:
     """
     Fetches audio contributions for a specific user by **username**.
     Endpoint: GET /api/v1/users/{username}/contributions/audio
-
     The API response is expected to be ``{"contributions": [...]}``.
     Each contribution's ``timestamp`` field is converted from an ISO-8601
     string to a timezone-aware UTC ``datetime`` object.
-
     Returns the raw list of contribution dicts (unfiltered).
     Cached for 5 minutes.
     """
@@ -91,11 +91,15 @@ def fetch_user_audio_contributions(token: str, username: str) -> List[Dict[str, 
 
         # Extract the contributions list from the response envelope
         if isinstance(data, dict):
-            records = data.get("contributions", [])
+            records = data.get("contributions") or []
         elif isinstance(data, list):
             records = data
         else:
             records = []
+
+        # Ensure records is a non-None iterable
+        if not records:
+            return []
 
         # Parse timestamp strings -> datetime objects & tag username
         for record in records:
@@ -103,7 +107,9 @@ def fetch_user_audio_contributions(token: str, username: str) -> List[Dict[str, 
             if isinstance(ts, str):
                 record["timestamp"] = _parse_timestamp(ts)
             record.setdefault("username", username)
+
         return records
+
     except requests.exceptions.RequestException as e:
         print(f"Error fetching audio contributions for user {username}: {e}")
         return []
