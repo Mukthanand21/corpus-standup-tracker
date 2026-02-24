@@ -3,9 +3,9 @@
         {
             "name": "trishul",
             "members": [
-                "591d3e4b-87e8-4277-a8a6-2a314c849725",
                 "8d53a79b-ae48-48db-bd28-1aa8557357a3",
-                "26df948f-f50f-4888-874b-d688e96c83b3"
+                "26df948f-f50f-4888-874b-d688e96c83b3",
+                "591d3e4b-87e8-4277-a8a6-2a314c849725"
             ]
         },
         {
@@ -59,6 +59,36 @@
             "members": [
                 "702db2d3-7bee-42f8-9ede-de5b2eb43c26",
                 "ca3e5405-cb5f-4d09-af1c-d2cd9c9437d5"
+            ]
+        },
+        {
+            "name": "Core",
+            "members": [
+                {
+                    "id": "3f51fb79-8151-4fa8-9dd9-8355e6db9d63",
+                    "name": "Patlolla Laxman Reddy",
+                    "username": "laxman_reddy_patlolla"
+                },
+                {
+                    "id": "1fe93c41-c492-4eb8-acc3-0b97e5aae8cc",
+                    "name": "Mondyagu Abhilash",
+                    "username": "abhilash653"
+                },
+                {
+                    "id": "a6a7e0e4-9217-4c09-8e28-e88bc715abaa",
+                    "name": "SWARNA RATHNA MADHURI KANDA",
+                    "username": "swarna_kanda"
+                }
+            ]
+        },
+        {
+            "name": "BrainStrorm",
+            "members": [
+                {
+                    "id": "7731cef5-af35-4f1b-8588-0d459277d206",
+                    "name": "Sathwika reddy",
+                    "username": "sathwikareddy_damanagari"
+                }
             ]
         }
     ]
