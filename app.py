@@ -20,6 +20,23 @@ if "api_token" not in st.session_state:
     st.session_state["api_token"] = None
 if "user_phone" not in st.session_state:
     st.session_state["user_phone"] = None
+if "user_name" not in st.session_state:
+    st.session_state["user_name"] = None
+
+
+def fetch_current_user(token: str) -> dict:
+    """Fetch the currently logged-in user's profile."""
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
 
 
 def login(phone: str, password: str) -> dict:
@@ -38,8 +55,17 @@ def login(phone: str, password: str) -> dict:
                 or data.get("data", {}).get("access_token")
                 or data.get("data", {}).get("token")
             )
+            # Try to extract the user's name from the login response
+            user_data = data.get("user") or data.get("data", {}).get("user") or data
+            name = (
+                user_data.get("name")
+                or user_data.get("username")
+                or user_data.get("full_name")
+                or user_data.get("display_name")
+                or ""
+            )
             if token:
-                return {"success": True, "token": token}
+                return {"success": True, "token": token, "name": name}
             return {"success": False, "message": "Login succeeded but no token found in response."}
         msg = data.get("message") or data.get("detail") or resp.text[:200]
         return {"success": False, "message": msg}
@@ -135,10 +161,22 @@ if not st.session_state.get("logged_in"):
     st.markdown("---")
 
     with st.form("login_form", clear_on_submit=False):
-        phone = st.text_input(
-            "Phone Number",
-            placeholder="+919999999999",
-        )
+        st.markdown("Phone Number")
+        col_prefix, col_number = st.columns([1, 4])
+        with col_prefix:
+            st.text_input(
+                "Prefix",
+                value="+91",
+                disabled=True,
+                label_visibility="collapsed",
+            )
+        with col_number:
+            phone_number = st.text_input(
+                "Number",
+                placeholder="9999999999",
+                label_visibility="collapsed",
+            )
+        phone = f"+91{phone_number}" if phone_number else ""
         password = st.text_input(
             "Password",
             type="password",
@@ -148,7 +186,7 @@ if not st.session_state.get("logged_in"):
         submit_button = st.form_submit_button("Sign In →", use_container_width=True)
 
     if submit_button:
-        if not phone or not password:
+        if not phone_number or not password:
             st.error("Please enter both phone number and password.")
         else:
             with st.spinner("Authenticating…"):
@@ -157,6 +195,18 @@ if not st.session_state.get("logged_in"):
                     st.session_state["logged_in"] = True
                     st.session_state["api_token"] = result["token"]
                     st.session_state["user_phone"] = phone
+                    # Get user name from login response or fetch profile
+                    name = result.get("name", "")
+                    if not name:
+                        profile = fetch_current_user(result["token"])
+                        name = (
+                            profile.get("name")
+                            or profile.get("username")
+                            or profile.get("full_name")
+                            or profile.get("display_name")
+                            or ""
+                        )
+                    st.session_state["user_name"] = name or phone
                     st.rerun()
                 else:
                     st.error(f"❌ {result['message']}")
@@ -435,7 +485,7 @@ with st.sidebar:
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:#8899bb;
         margin-bottom:4px;">Logged in as</div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#60a5fa;
-        margin-bottom:8px;">{st.session_state.get('user_phone', 'Unknown')}</div>
+        margin-bottom:8px;">{st.session_state.get('user_name') or st.session_state.get('user_phone', 'Unknown')}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -443,6 +493,7 @@ with st.sidebar:
         st.session_state["logged_in"] = False
         st.session_state["api_token"] = None
         st.session_state["user_phone"] = None
+        st.session_state["user_name"] = None
         st.rerun()
 
     st.markdown("---")
