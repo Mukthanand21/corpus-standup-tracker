@@ -770,6 +770,7 @@ with tab_analytics:
                 records_by_user = {u: fetch_user_audio_contributions(api_token, u) for u in all_members}
 
             rows = []
+            total_duration_secs = 0
             submitted_w = [(9.0, 9.5), (12.0, 12.5), (13.5, 14.0), (16.5, 17.0)]
             late_w      = [(9.5, 10.5), (12.5, 13.5), (14.0, 15.0), (17.0, 24.0)]
 
@@ -788,6 +789,8 @@ with tab_analytics:
                         ts_ist   = ts.astimezone(IST)
                         rec_date = ts_ist.date()
                         if start_dt <= rec_date <= today:
+                            dur = r.get("duration") or r.get("duration_seconds") or 0
+                            total_duration_secs += int(dur)
                             h = ts_ist.hour + ts_ist.minute / 60
                             rows.append({
                                 "user":     uid,
@@ -808,15 +811,20 @@ with tab_analytics:
                 n_oth  = total - n_sub - n_late
                 active = df_all["user"].nunique()
 
+                hrs  = total_duration_secs // 3600
+                mins = (total_duration_secs % 3600) // 60
+                hrs_display = f"{hrs}h {mins}m" if hrs else f"{mins}m"
+
                 kpis2 = [
                     ("🎙️", "Total Uploads",  str(total),                                    "#3b82f6", "rgba(59,130,246,0.12)",  "rgba(59,130,246,0.25)"),
+                    ("⏱️", "Total Hours",    hrs_display,                                   "#06b6d4", "rgba(6,182,212,0.12)",   "rgba(6,182,212,0.25)"),
                     ("✅", "On Time",        str(n_sub),                                    "#10b981", "rgba(16,185,129,0.12)",  "rgba(16,185,129,0.25)"),
                     ("⚡", "Late",           str(n_late),                                   "#f59e0b", "rgba(245,158,11,0.12)",  "rgba(245,158,11,0.25)"),
                     ("🕐", "Outside Window", str(n_oth),                                    "#ef4444", "rgba(239,68,68,0.12)",   "rgba(239,68,68,0.25)"),
                     ("👥", "Active Members", str(active),                                   "#8b5cf6", "rgba(139,92,246,0.12)",  "rgba(139,92,246,0.25)"),
                     ("📈", "On-Time Rate",   f"{n_sub/total*100:.1f}%" if total else "0%",  "#10b981", "rgba(16,185,129,0.12)",  "rgba(16,185,129,0.25)"),
                 ]
-                cols2 = st.columns(6)
+                cols2 = st.columns(len(kpis2))
                 for col, (icon, label, val, clr, bg, brd) in zip(cols2, kpis2):
                     col.markdown(f"""
                     <div style="background:{bg};border:1px solid {brd};border-radius:14px;
