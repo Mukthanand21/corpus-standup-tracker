@@ -13,6 +13,11 @@ load_dotenv()
 
 BASE_URL = os.getenv("BASE_URL", "https://api.corpus.swecha.org/api/v1")
 
+
+def _member_id(m) -> str:
+    """Extract the plain ID string from a member entry (supports old str and new dict format)."""
+    return m.get("id") if isinstance(m, dict) else m
+
 # Initialize session state for login
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -580,7 +585,7 @@ with tab_dash:
 
     if run:
         teams_data    = load_teams()
-        all_usernames = list({u for t in teams_data.get("teams", []) for u in t.get("members", [])})
+        all_usernames = list({_member_id(u) for t in teams_data.get("teams", []) for u in t.get("members", [])})
 
         if not all_usernames:
             st.warning("No members found. Add members in Team Management first.")
@@ -590,7 +595,7 @@ with tab_dash:
 
             results = []
             for team in teams_data.get("teams", []):
-                slots     = get_team_slot_compliance(team.get("members", []), records_by_user, selected_date)
+                slots     = get_team_slot_compliance([_member_id(m) for m in team.get("members", [])], records_by_user, selected_date)
                 submitted = sum(1 for v in slots.values() if v == "submitted")
                 late      = sum(1 for v in slots.values() if v == "late")
                 missing   = len(REQUIRED_SESSIONS) - submitted - late
@@ -755,8 +760,8 @@ with tab_analytics:
         if "All" not in analytics_teams:
             teams_to_show = [t for t in teams_to_show if t["name"] in analytics_teams]
 
-        all_members    = list({u for t in teams_to_show for u in t.get("members", [])})
-        member_to_team = {u: t["name"] for t in teams_to_show for u in t.get("members", [])}
+        all_members    = list({_member_id(u) for t in teams_to_show for u in t.get("members", [])})
+        member_to_team = {_member_id(u): t["name"] for t in teams_to_show for u in t.get("members", [])}
 
         if not all_members:
             st.warning("No members found.")
@@ -1078,150 +1083,153 @@ with tab_teams:
     left, right = st.columns([1, 1.5], gap="large")
 
     with left:
-        # Create team card
-        st.markdown("""
-        <div style="background:linear-gradient(135deg,#0d1629,#111d35);
-          border:1px solid rgba(255,255,255,0.08);border-radius:16px;
-          padding:22px;margin-bottom:20px;">
-          <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
-            color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
-            ◈ Create New Team
-          </div>
-        """, unsafe_allow_html=True)
+        # Create team card — use st.container with border for proper wrapping
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+              color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">
+              ◈ Create New Team
+            </div>""", unsafe_allow_html=True)
 
-        nt = st.text_input("Team name", placeholder="e.g. Alpha Squad", key="new_team", label_visibility="collapsed")
-        if st.button("＋  Create Team", type="primary", use_container_width=True):
-            td = load_teams()
-            if nt.strip() and nt.strip() not in [t["name"] for t in td["teams"]]:
-                td["teams"].append({"name": nt.strip(), "members": []})
-                save_teams(td)
-                st.success(f"Team **{nt.strip()}** created!")
-                st.rerun()
-            elif not nt.strip():
-                st.warning("Enter a team name.")
-            else:
-                st.warning("Team already exists.")
-        st.markdown("</div>", unsafe_allow_html=True)
+            nt = st.text_input("Team name", placeholder="e.g. Alpha Squad", key="new_team", label_visibility="collapsed")
+            if st.button("＋  Create Team", type="primary", use_container_width=True):
+                td = load_teams()
+                if nt.strip() and nt.strip() not in [t["name"] for t in td["teams"]]:
+                    td["teams"].append({"name": nt.strip(), "members": []})
+                    save_teams(td)
+                    st.success(f"Team **{nt.strip()}** created!")
+                    st.rerun()
+                elif not nt.strip():
+                    st.warning("Enter a team name.")
+                else:
+                    st.warning("Team already exists.")
 
-        # Search + Add member card
-        st.markdown("""
-        <div style="background:linear-gradient(135deg,#0d1629,#111d35);
-          border:1px solid rgba(255,255,255,0.08);border-radius:16px;
-          padding:22px;">
-          <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
-            color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">
-            ◈ Add Member
-          </div>
-        """, unsafe_allow_html=True)
+        # Search + Add member card — use st.container with border
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+              color:#4d6fa0;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">
+              ◈ Add Member
+            </div>""", unsafe_allow_html=True)
 
-        try:
-            from streamlit_searchbox import st_searchbox
+            try:
+                from streamlit_searchbox import st_searchbox
 
-            def _sfn(query: str):
-                if not query or not query.strip() or not api_token: return []
-                raw    = search_users(api_token, query.strip())
-                labels, rmap = [], {}
-                for u in raw:
-                    uname   = u.get("username") or u.get("id") or ""
-                    display = u.get("name") or u.get("full_name") or uname
-                    lbl     = f"{display} (@{uname})" if display and display != uname else uname
-                    if lbl and lbl not in rmap:
-                        labels.append(lbl)
-                        rmap[lbl] = u
-                st.session_state["_rmap"] = rmap
-                return labels
+                def _sfn(query: str):
+                    if not query or not query.strip() or not api_token: return []
+                    raw    = search_users(api_token, query.strip())
+                    labels, rmap = [], {}
+                    for u in raw:
+                        uname   = u.get("username") or u.get("id") or ""
+                        display = u.get("name") or u.get("full_name") or uname
+                        lbl     = f"{display} (@{uname})" if display and display != uname else uname
+                        if lbl and lbl not in rmap:
+                            labels.append(lbl)
+                            rmap[lbl] = u
+                    st.session_state["_rmap"] = rmap
+                    return labels
 
-            sel_lbl = st_searchbox(_sfn, key="sb",
-                placeholder="Type name or username…",
-                label="Search user", clear_on_submit=False, debounce=350)
+                sel_lbl = st_searchbox(_sfn, key="sb",
+                    placeholder="Type name or username…",
+                    label="Search user", clear_on_submit=False, debounce=350)
 
-            if sel_lbl:
-                import re
-                rmap    = st.session_state.get("_rmap", {})
-                matched = rmap.get(sel_lbl, {})
-                m_re    = re.search(r"@(\w+)", sel_lbl)
-                uguess  = matched.get("username") or (m_re.group(1) if m_re else sel_lbl.strip())
-                idguess = matched.get("id") or uguess
-                if idguess != st.session_state.get("_last_sb", ""):
-                    st.session_state["_last_sb"] = idguess
-                    with st.spinner("Fetching profile…"):
-                        f = fetch_user_by_id(api_token, idguess)
-                    if f:
-                        if not f.get("id"): f["id"] = idguess
-                        st.session_state["sel_user"] = f
-                    else:
-                        st.error("Could not fetch profile.")
-
-        except ImportError:
-            st.caption("Install `streamlit-searchbox` for typeahead")
-            uq = st.text_input("Search", placeholder="Type name or username…", key="uq_input", label_visibility="collapsed")
-            if uq and uq.strip() and uq.strip() != st.session_state.get("_lq", ""):
-                st.session_state["_lq"] = uq.strip()
-                st.session_state.pop("_ls", "")
-                with st.spinner("Searching…"):
-                    st.session_state["_sr"] = search_users(api_token, uq.strip()) or []
-            sr = st.session_state.get("_sr", [])
-            if sr and uq and uq.strip():
-                opts = {}
-                for u in sr:
-                    un   = u.get("username") or u.get("id") or ""
-                    disp = u.get("name") or u.get("full_name") or un
-                    lbl  = f"{disp} (@{un})" if disp != un else un
-                    if un and lbl not in opts: opts[lbl] = u.get("id") or un
-                if opts:
-                    sl  = st.radio("", list(opts.keys()), key="u_radio", horizontal=True, label_visibility="collapsed")
-                    sid = opts.get(sl, "")
-                    if sid and sid != st.session_state.get("_ls", ""):
-                        st.session_state["_ls"] = sid
-                        with st.spinner(): f = fetch_user_by_id(api_token, sid)
+                if sel_lbl:
+                    import re
+                    rmap    = st.session_state.get("_rmap", {})
+                    matched = rmap.get(sel_lbl, {})
+                    m_re    = re.search(r"@(\w+)", sel_lbl)
+                    uguess  = matched.get("username") or (m_re.group(1) if m_re else sel_lbl.strip())
+                    idguess = matched.get("id") or uguess
+                    if idguess != st.session_state.get("_last_sb", ""):
+                        st.session_state["_last_sb"] = idguess
+                        with st.spinner("Fetching profile…"):
+                            f = fetch_user_by_id(api_token, idguess)
                         if f:
-                            if not f.get("id"): f["id"] = sid
+                            if not f.get("id"): f["id"] = idguess
                             st.session_state["sel_user"] = f
+                        else:
+                            st.error("Could not fetch profile.")
 
-        # Selected user display
-        if st.session_state.get("sel_user"):
-            u   = st.session_state["sel_user"]
-            uid = u.get("id", "")
-            unm = u.get("name") or u.get("full_name") or u.get("username") or uid
-            st.markdown(f"""
-            <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);
-              border-radius:12px;padding:14px 16px;margin:12px 0;display:flex;align-items:center;gap:14px;">
-              <div style="width:42px;height:42px;background:linear-gradient(135deg,#059669,#10b981);
-                border-radius:50%;display:flex;align-items:center;justify-content:center;
-                font-size:18px;flex-shrink:0;">👤</div>
-              <div>
-                <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:15px;
-                  color:#34d399;line-height:1;">{unm}</div>
-                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                  color:#2d6e4e;margin-top:4px;">{uid}</div>
-              </div>
-              <div style="margin-left:auto;background:rgba(16,185,129,0.15);border-radius:6px;
-                padding:4px 10px;font-size:11px;color:#34d399;font-weight:700;">SELECTED</div>
-            </div>
-            """, unsafe_allow_html=True)
+            except ImportError:
+                st.caption("Install `streamlit-searchbox` for typeahead")
+                uq = st.text_input("Search", placeholder="Type name or username…", key="uq_input", label_visibility="collapsed")
+                if uq and uq.strip() and uq.strip() != st.session_state.get("_lq", ""):
+                    st.session_state["_lq"] = uq.strip()
+                    st.session_state.pop("_ls", "")
+                    with st.spinner("Searching…"):
+                        st.session_state["_sr"] = search_users(api_token, uq.strip()) or []
+                sr = st.session_state.get("_sr", [])
+                if sr and uq and uq.strip():
+                    opts = {}
+                    for u in sr:
+                        un   = u.get("username") or u.get("id") or ""
+                        disp = u.get("name") or u.get("full_name") or un
+                        lbl  = f"{disp} (@{un})" if disp != un else un
+                        if un and lbl not in opts: opts[lbl] = u.get("id") or un
+                    if opts:
+                        # Fix #6: Use vertical selectbox instead of horizontal radio to prevent overflow
+                        sl  = st.selectbox("Select user", list(opts.keys()), key="u_select", label_visibility="collapsed")
+                        sid = opts.get(sl, "")
+                        if sid and sid != st.session_state.get("_ls", ""):
+                            st.session_state["_ls"] = sid
+                            with st.spinner(): f = fetch_user_by_id(api_token, sid)
+                            if f:
+                                if not f.get("id"): f["id"] = sid
+                                st.session_state["sel_user"] = f
 
-            ex_teams = [t["name"] for t in load_teams().get("teams", [])]
-            if ex_teams:
-                ta1, ta2 = st.columns([2, 1])
-                with ta1:
-                    sel_t = st.selectbox("Assign to", ex_teams, key=f"at_{uid}", label_visibility="collapsed")
-                with ta2:
-                    if st.button("➕  Add", key=f"add_{uid}", use_container_width=True):
-                        _td = load_teams()
-                        for _t in _td["teams"]:
-                            if _t["name"] == sel_t:
-                                if uid not in _t["members"]:
-                                    _t["members"].append(uid)
-                                    save_teams(_td)
-                                    st.success(f"Added to **{sel_t}**!")
-                                    st.rerun()
-                                else:
-                                    st.info("Already a member.")
-                                break
-            else:
-                st.info("Create a team first.")
+            # Selected user display
+            if st.session_state.get("sel_user"):
+                u   = st.session_state["sel_user"]
+                uid = u.get("id", "")
+                unm = u.get("name") or u.get("full_name") or u.get("username") or uid
+                st.markdown(f"""
+                <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);
+                  border-radius:12px;padding:14px 16px;margin:12px 0;display:flex;align-items:center;gap:14px;">
+                  <div style="width:42px;height:42px;background:linear-gradient(135deg,#059669,#10b981);
+                    border-radius:50%;display:flex;align-items:center;justify-content:center;
+                    font-size:18px;flex-shrink:0;">👤</div>
+                  <div>
+                    <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:15px;
+                      color:#34d399;line-height:1;">{unm}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                      color:#2d6e4e;margin-top:4px;">{uid}</div>
+                  </div>
+                  <div style="margin-left:auto;background:rgba(16,185,129,0.15);border-radius:6px;
+                    padding:4px 10px;font-size:11px;color:#34d399;font-weight:700;">SELECTED</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+                ex_teams = [t["name"] for t in load_teams().get("teams", [])]
+                if ex_teams:
+                    ta1, ta2 = st.columns([2, 1])
+                    with ta1:
+                        sel_t = st.selectbox("Assign to", ex_teams, key=f"at_{uid}", label_visibility="collapsed")
+                    with ta2:
+                        if st.button("➕  Add", key=f"add_{uid}", use_container_width=True):
+                            _td = load_teams()
+                            for _t in _td["teams"]:
+                                if _t["name"] == sel_t:
+                                    # Check if member already exists (support both old str and new dict format)
+                                    existing_ids = [
+                                        (m["id"] if isinstance(m, dict) else m)
+                                        for m in _t["members"]
+                                    ]
+                                    if uid not in existing_ids:
+                                        # Store member as dict with id, name, username
+                                        member_info = {
+                                            "id": uid,
+                                            "name": u.get("name") or u.get("full_name") or "",
+                                            "username": u.get("username") or "",
+                                        }
+                                        _t["members"].append(member_info)
+                                        save_teams(_td)
+                                        st.success(f"Added to **{sel_t}**!")
+                                        st.rerun()
+                                    else:
+                                        st.info("Already a member.")
+                                    break
+                else:
+                    st.info("Create a team first.")
 
     # Right: Team cards
     with right:
@@ -1247,16 +1255,25 @@ with tab_teams:
         else:
             for i, team in enumerate(td_all["teams"]):
                 members = team.get("members", [])
-                mc      = len(members)
+                member_count = len(members)
 
                 with st.expander(
-                    f"{'🟢' if mc > 0 else '⚫'}  {team['name']}  ·  {mc} member{'s' if mc != 1 else ''}",
-                    expanded=(i == 0 and mc > 0),
+                    f"{'🟢' if member_count > 0 else '⚫'}  {team['name']}  ·  {member_count} member{'s' if member_count != 1 else ''}",
+                    expanded=(i == 0 and member_count > 0),
                 ):
-                    hc1, hc2 = st.columns([3, 1])
-                    with hc2:
-                        if st.button("🗑️  Delete", key=f"del_{i}",
-                            help="Delete this team permanently", use_container_width=True):
+                    # Fix #5: Delete with confirmation using a checkbox guard
+                    del_col1, del_col2, del_col3 = st.columns([2, 1.5, 1.5])
+                    with del_col1:
+                        confirm_key = f"confirm_del_{i}"
+                        confirm_del = st.checkbox("Confirm delete", key=confirm_key, label_visibility="visible")
+                    with del_col3:
+                        if st.button(
+                            "🗑️  Delete",
+                            key=f"del_{i}",
+                            help="Check 'Confirm delete' first, then click to delete",
+                            use_container_width=True,
+                            disabled=not confirm_del,
+                        ):
                             delete_team(team["name"])
                             st.rerun()
 
@@ -1264,15 +1281,35 @@ with tab_teams:
                         st.markdown(f"""
                         <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
                           color:#556080;letter-spacing:1px;text-transform:uppercase;
-                          margin-bottom:10px;">{mc} MEMBER{'S' if mc != 1 else ''}</div>
+                          margin-bottom:10px;">{member_count} MEMBER{'S' if member_count != 1 else ''}</div>
                         """, unsafe_allow_html=True)
 
                         to_remove = []
-                        for mid in members:
-                            ud  = fetch_user_by_id(api_token, mid) if api_token else {}
-                            mn  = ud.get("name") or ud.get("full_name") or ud.get("username") or f"@{mid}"
-                            mc1, mc2 = st.columns([5, 1])
-                            with mc1:
+                        for m_entry in members:
+                            # Support both old format (plain string id) and new format (dict)
+                            if isinstance(m_entry, dict):
+                                mid = m_entry.get("id", "")
+                                stored_name = m_entry.get("name", "")
+                                stored_username = m_entry.get("username", "")
+                            else:
+                                mid = m_entry
+                                stored_name = ""
+                                stored_username = ""
+
+                            # Fetch from API, use stored info as fallback
+                            ud = fetch_user_by_id(api_token, mid) if api_token else {}
+                            member_name = (
+                                ud.get("name")
+                                or ud.get("full_name")
+                                or ud.get("username")
+                                or stored_name
+                                or stored_username
+                                or f"@{mid[:8]}…"
+                            )
+                            display_id = ud.get("username") or stored_username or mid
+
+                            col_info, col_btn = st.columns([5, 1])
+                            with col_info:
                                 st.markdown(f"""
                                 <div style="display:flex;align-items:center;gap:12px;
                                   background:rgba(255,255,255,0.03);
@@ -1283,21 +1320,25 @@ with tab_teams:
                                     font-size:14px;flex-shrink:0;">👤</div>
                                   <div>
                                     <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;
-                                      color:#e8edf8;">{mn}</div>
+                                      color:#e8edf8;">{member_name}</div>
                                     <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                                      color:#556080;margin-top:2px;">{mid}</div>
+                                      color:#556080;margin-top:2px;">@{display_id}</div>
                                   </div>
                                 </div>""", unsafe_allow_html=True)
-                            with mc2:
-                                st.write("")
-                                if st.button("✕", key=f"rm_{i}_{mid}", help=f"Remove {mn}"):
+                            with col_btn:
+                                st.markdown("<div style='margin-top:12px;'>", unsafe_allow_html=True)
+                                if st.button("❌ Remove", key=f"rm_{i}_{mid}", help=f"Remove {member_name}", use_container_width=True):
                                     to_remove.append(mid)
+                                st.markdown("</div>", unsafe_allow_html=True)
 
                         if to_remove:
                             _td2 = load_teams()
                             for _t in _td2["teams"]:
                                 if _t["name"] == team["name"]:
-                                    _t["members"] = [m for m in _t["members"] if m not in to_remove]
+                                    _t["members"] = [
+                                        m for m in _t["members"]
+                                        if (m.get("id") if isinstance(m, dict) else m) not in to_remove
+                                    ]
                                     break
                             save_teams(_td2)
                             st.rerun()

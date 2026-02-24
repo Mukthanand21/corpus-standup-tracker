@@ -22,13 +22,24 @@ def _parse_timestamp(ts_str: str) -> datetime:
 def fetch_user_by_id(token: str, user_id: str) -> Dict[str, Any]:
     """
     Fetches details for a specific user by their UUID.
+    Handles nested API responses (e.g. wrapped in 'data' or 'user' keys).
     Cached for 10 minutes.
     """
     headers = {"Authorization": f"Bearer {token}"}
     try:
         response = requests.get(f"{BASE_URL}/users/{user_id}", headers=headers, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Unwrap nested responses
+        if isinstance(data, dict):
+            # Check for common wrapper keys
+            if "data" in data and isinstance(data["data"], dict):
+                data = data["data"]
+            elif "user" in data and isinstance(data["user"], dict):
+                data = data["user"]
+
+        return data if isinstance(data, dict) else {}
     except Exception as e:
         print(f"Error fetching user {user_id}: {e}")
         return {}

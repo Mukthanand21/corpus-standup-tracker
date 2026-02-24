@@ -24,13 +24,14 @@ def save_teams(teams_data: Dict[str, List[Dict]]):
         print(f"Error saving teams: {e}")
 
 def get_team_map() -> Dict[str, str]:
-    """Returns a flat mapping of username -> team_name."""
+    """Returns a flat mapping of member_id -> team_name."""
     data = load_teams()
     mapping = {}
     for team in data.get("teams", []):
         name = team.get("name")
-        for username in team.get("members", []):
-            mapping[username] = name
+        for member in team.get("members", []):
+            mid = member.get("id") if isinstance(member, dict) else member
+            mapping[mid] = name
     return mapping
 
 def get_team(username: str) -> str:
