@@ -88,6 +88,31 @@
                     "id": "7731cef5-af35-4f1b-8588-0d459277d206",
                     "name": "Sathwika reddy",
                     "username": "sathwikareddy_damanagari"
+                },
+                {
+                    "id": "853177e1-2cda-4a5b-85af-10e924aeae5e",
+                    "name": "C Sahasra",
+                    "username": "sahasra"
+                }
+            ]
+        },
+        {
+            "name": "Trioforce",
+            "members": [
+                {
+                    "id": "6174019e-704a-4f7d-8948-7d9da509e169",
+                    "name": "Banuri Koushik Reddy",
+                    "username": "koushik_18"
+                },
+                {
+                    "id": "f0154a5b-b401-4b49-8904-bd07b50cc46b",
+                    "name": "Pullaiahgari Suma",
+                    "username": "suma2304"
+                },
+                {
+                    "id": "0e852321-3a2c-4222-aaed-68640a8c8da2",
+                    "name": "Majjuri Aravind swamy",
+                    "username": "aravindswamy"
                 }
             ]
         }
